@@ -14,19 +14,21 @@ There is no Signal bot. Hush is a **linked device** on your existing account (`s
 
 ## Install
 
-Needs a Rust toolchain and [signal-cli](https://github.com/AsamK/signal-cli) on `PATH` (or `HUSH_SIGNAL_CLI`).
+Install the latest GitHub Release (SHA-256 verified; cosign if present):
 
 ```bash
-git clone https://github.com/turinglabsorg/hush.git
-cd hush
-./install.sh --from-source --agent-skill --path-link
+curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh
 ```
 
-Or:
+With the agent skill and a PATH symlink:
 
 ```bash
-cargo install --git https://github.com/turinglabsorg/hush --locked
+curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
 ```
+
+Pin a version with `--version v0.1.0`. Build from a checkout with `--from-source`.
+
+Needs [signal-cli](https://github.com/AsamK/signal-cli) on `PATH` (or `HUSH_SIGNAL_CLI`).
 
 Then:
 

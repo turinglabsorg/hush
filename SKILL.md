@@ -47,6 +47,12 @@ hush rm <name>
 hush doctor --json
 ```
 
+If the `hush` binary is missing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
+```
+
 ## Setup (human, not you)
 
 If `hush doctor --json` reports missing identity or unlinked Signal, tell the user to run:

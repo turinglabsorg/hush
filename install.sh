@@ -7,27 +7,32 @@ INSTALL_DIR="${HUSH_INSTALL_DIR:-$HOME/.local/bin}"
 SOURCE="${HUSH_INSTALL_SOURCE:-}"
 FROM_SOURCE=0
 DRY_RUN=0
+VERIFY_DOWNLOAD="${HUSH_INSTALL_VERIFY:-1}"
+COSIGN_VERIFY="${HUSH_INSTALL_COSIGN:-auto}"
 INSTALL_AGENT_SKILL=0
 AGENT_SKILL_DIR="${HUSH_AGENT_SKILL_DIR:-$HOME/.agents/skills/hush}"
 INSTALL_PATH_LINK=0
 PATH_LINK_DIR="${HUSH_PATH_LINK_DIR:-/usr/local/bin}"
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || printf '.')
 
 usage() {
   cat <<'USAGE'
-Install hush.
+Install hush from GitHub Releases.
 
 Usage:
   ./install.sh [options]
 
 Options:
-  --from-source         Build with cargo from this checkout (default if no release URL).
-  --version <tag>       GitHub release tag (when not using --from-source).
+  --version <tag>       Install a specific tag, for example v0.1.0.
   --install-dir <dir>   Install directory. Default: $HOME/.local/bin.
-  --source <path|url>   Install from a local binary or URL.
+  --source <path|url>   Install from a local file or direct URL.
+  --from-source         Build with cargo from this checkout.
   --agent-skill [dir]   Install the agent skill. Default: $HOME/.agents/skills/hush.
   --path-link [dir]     Symlink hush into a PATH directory. Default: /usr/local/bin.
+  --no-verify           Skip SHA-256 verification for downloaded binaries.
+  --cosign              Require cosign signature verification.
+  --no-cosign           Skip optional cosign verification.
   --dry-run             Print actions without writing files.
   -h, --help            Show this help.
 USAGE
@@ -81,6 +86,18 @@ while [ "$#" -gt 0 ]; do
         shift
       fi
       ;;
+    --no-verify)
+      VERIFY_DOWNLOAD=0
+      shift
+      ;;
+    --cosign)
+      COSIGN_VERIFY=1
+      shift
+      ;;
+    --no-cosign)
+      COSIGN_VERIFY=0
+      shift
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -106,6 +123,13 @@ detect_asset() {
   esac
 }
 
+is_url() {
+  case "$1" in
+    http://*|https://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 download() {
   source="$1"
   destination="$2"
@@ -126,11 +150,92 @@ download() {
   esac
 }
 
+sha256_of_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    fail "sha256sum or shasum is required to verify downloads"
+  fi
+}
+
+verify_sha256() {
+  binary="$1"
+  source_url="$2"
+  checksum_file="$3"
+  expected="$(awk 'NF {print $1; exit}' "$checksum_file")"
+  [ -n "$expected" ] || fail "checksum file is empty: $source_url.sha256"
+  actual="$(sha256_of_file "$binary")"
+  if [ "$actual" != "$expected" ]; then
+    fail "checksum mismatch for $source_url"
+  fi
+  printf 'verified sha256: %s\n' "$expected"
+}
+
+verify_cosign_blob() {
+  binary="$1"
+  source_url="$2"
+  sig_file="$3"
+  cert_file="$4"
+  command -v cosign >/dev/null 2>&1 || fail "cosign is required by --cosign"
+  identity_regexp="https://github.com/$REPO/.github/workflows/release.yml@refs/tags/v.*"
+  cosign verify-blob \
+    --certificate "$cert_file" \
+    --signature "$sig_file" \
+    --certificate-identity-regexp "$identity_regexp" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    "$binary" >/dev/null
+  printf 'verified cosign signature: %s\n' "$source_url"
+}
+
+verify_downloaded_binary() {
+  binary="$1"
+  source_url="$2"
+  [ "$VERIFY_DOWNLOAD" = "0" ] && return
+  if ! is_url "$source_url"; then
+    printf 'verification skipped: local source\n'
+    return
+  fi
+  checksum_file="$(mktemp "${TMPDIR:-/tmp}/hush.sha256.XXXXXX")"
+  download "$source_url.sha256" "$checksum_file"
+  verify_sha256 "$binary" "$source_url" "$checksum_file"
+  rm -f "$checksum_file"
+
+  if [ "$COSIGN_VERIFY" = "0" ]; then
+    return
+  fi
+  if [ "$COSIGN_VERIFY" = "auto" ] && ! command -v cosign >/dev/null 2>&1; then
+    printf 'cosign verification skipped: cosign not found\n'
+    return
+  fi
+  sig_file="$(mktemp "${TMPDIR:-/tmp}/hush.sig.XXXXXX")"
+  cert_file="$(mktemp "${TMPDIR:-/tmp}/hush.pem.XXXXXX")"
+  download "$source_url.sig" "$sig_file"
+  download "$source_url.pem" "$cert_file"
+  verify_cosign_blob "$binary" "$source_url" "$sig_file" "$cert_file"
+  rm -f "$sig_file" "$cert_file"
+}
+
+raw_ref() {
+  if [ "$VERSION" = "latest" ]; then
+    printf 'main'
+  else
+    printf '%s' "$VERSION"
+  fi
+}
+
+in_checkout() {
+  [ -f "$SCRIPT_DIR/SKILL.md" ] && [ -f "$SCRIPT_DIR/Cargo.toml" ]
+}
+
 install_skill_file() {
   source_path="$1"
   destination="$2"
-  if [ -f "$SCRIPT_DIR/$source_path" ]; then
+  if in_checkout && [ -f "$SCRIPT_DIR/$source_path" ]; then
     cp "$SCRIPT_DIR/$source_path" "$destination"
+  else
+    download "https://raw.githubusercontent.com/$REPO/$(raw_ref)/$source_path" "$destination"
   fi
 }
 
@@ -148,20 +253,17 @@ install_agent_skill() {
 }
 
 build_from_source() {
+  in_checkout || fail "--from-source requires a hush git checkout"
   command -v cargo >/dev/null 2>&1 || fail "cargo is required for --from-source"
   printf 'building hush from %s\n' "$SCRIPT_DIR"
   if [ "$DRY_RUN" -eq 1 ]; then
-    printf 'dry-run: would cargo build --release\n'
+    printf 'dry-run: would cargo build --release --locked\n'
     printf '%s\n' "$SCRIPT_DIR/target/release/hush"
     return
   fi
-  cargo build --release --manifest-path "$SCRIPT_DIR/Cargo.toml"
+  cargo build --release --locked --manifest-path "$SCRIPT_DIR/Cargo.toml"
   printf '%s\n' "$SCRIPT_DIR/target/release/hush"
 }
-
-if [ -z "$SOURCE" ] && [ "$FROM_SOURCE" -eq 0 ]; then
-  FROM_SOURCE=1
-fi
 
 if [ "$FROM_SOURCE" -eq 1 ]; then
   SOURCE="$(build_from_source)"
@@ -188,6 +290,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
     tmp="$(mktemp "${TMPDIR:-/tmp}/hush.XXXXXX")"
     trap 'rm -f "$tmp"' EXIT INT TERM
     download "$SOURCE" "$tmp"
+    verify_downloaded_binary "$tmp" "$SOURCE"
     mv "$tmp" "$target"
   fi
   chmod +x "$target"
