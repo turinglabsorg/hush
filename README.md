@@ -1,16 +1,16 @@
 # hush
 
-Agent-blind secrets for humans and coding agents. The value arrives over **Signal**, is stored encrypted with **age**, and is used by **name**. The CLI never prints plaintext.
+Agent-blind secrets for humans and coding agents. The value is shared over **Bitwarden** (Send link or vault item), is stored encrypted with **age**, and is used by **name**. The CLI never prints plaintext.
 
 MIT. Open source at [github.com/turinglabsorg/hush](https://github.com/turinglabsorg/hush).
 
 ```
-phone (Note to Self)  →  hush pull --name stripe-prod  →  ~/.hush/vault/stripe-prod.age
+bitwarden Send link  →  hush pull --name stripe-prod --send <url>  →  ~/.hush/vault/stripe-prod.age
 agent chat: "use hush:stripe-prod"
 hush run --name stripe-prod --env STRIPE_API_KEY -- curl ...
 ```
 
-There is no Signal bot. Hush is a **linked device** on your existing account (`signal-cli`), the same idea as Signal Desktop.
+The agent gets its own Bitwarden account (its own vault, optionally via `BITWARDENCLI_APPDATA_DIR`). Humans share secrets with it through **Bitwarden Send**, or through vault items (shared org collection) named `hush put NAME`.
 
 ## Install
 
@@ -28,37 +28,44 @@ curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh 
 
 Pin a version with `--version v0.1.0`. Build from a checkout with `--from-source`.
 
-Needs [signal-cli](https://github.com/AsamK/signal-cli) on `PATH` (or `HUSH_SIGNAL_CLI`).
+Needs the [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) on `PATH` (or `HUSH_BW_BIN`).
 
 Then:
 
 ```bash
-brew install signal-cli   # or install signal-cli another way
+bw login --apikey   # or `bw login` interactively; `bw config server <url>` first if self-hosted
+bw unlock           # export the printed BW_SESSION
+export BW_SESSION="..."
 hush init
-hush signal link          # QR → Signal → Settings → Linked devices
+hush doctor --json  # must report ok
 ```
 
 ## Deposit
 
-From the phone, send **Note to Self** with just the secret (or `hush put NAME` then the secret on the next lines).
+**Option A — Bitwarden Send (recommended).** Create a text Send with the secret, then in the agent chat paste only the Send **URL** (URLs are not secret) plus the name:
 
-Then, in the agent chat, only the name:
-
-> I put the secret in Signal, store it as `stripe-prod`
+> Store this as `stripe-prod`: https://vault.bitwarden.com/#/send/...
 
 The agent runs:
 
 ```bash
-hush pull --name stripe-prod --json
+hush pull --name stripe-prod --send <url> --json
 ```
 
-`hush pull` calls `signal-cli receive` internally, encrypts, writes the vault, and prints **metadata only**:
+For a password-protected Send, hand the password over out of band and use `--passwordenv VAR` or `--passwordfile PATH` (never a literal `--password` on the command line). `hush pull` receives the Send, encrypts, writes the vault, and prints **metadata only**:
 
 ```json
 {"event":"stored","name":"stripe-prod","sender":"self","replaced":false}
 ```
 
-`hush listen` is the optional long-running variant. Agents should use `pull`.
+**Option B — vault item.** Add an item to the agent's vault (or a shared org collection) named exactly `stripe-prod` (secret in the password or notes field), or named `hush put stripe-prod`. Then:
+
+```bash
+hush pull --name stripe-prod --json
+hush pull --json   # one-shot scan for all `hush put NAME` items
+```
+
+Add `--consume` to trash the vault item after it is stored. `hush listen` is the polling daemon variant (human use). Agents should use `pull`.
 
 ## Use
 
@@ -79,13 +86,11 @@ There is no `show` / `get`. Decrypt happens in memory and is injected into the c
 ~/.hush/vault/<name>.meta.json
 ```
 
-Override the home directory with `--home` or `HUSH_HOME`.
+Override the home directory with `--home` or `HUSH_HOME`. Point at another `bw` binary with `HUSH_BW_BIN`. `bw` auth (`BW_SESSION`, `BITWARDENCLI_APPDATA_DIR`) is inherited from the environment.
 
 ## Threat model
 
-Hush stops secrets from entering **agent transcripts**. It does not protect you from a process running as the same OS user with the identity file. `hush run` is the supported use path; reading vault ciphertext is expected, reading identity + decrypting is the bypass.
-
-Default allowlist is `self` (Note to Self / your own number). Add senders with `hush signal allow +E164`.
+Hush stops secrets from entering **agent transcripts**: `bw` output is piped, never printed. It does not protect you from a process running as the same OS user with the identity file. `hush run` is the supported use path; reading vault ciphertext is expected, reading identity + decrypting is the bypass. Never run `bw get` / `bw send receive` by hand in front of an agent — the value would land in the transcript.
 
 ## Development
 
@@ -95,8 +100,10 @@ cargo clippy --locked -- -D warnings
 cargo test --locked
 ```
 
+Integration tests stub the Bitwarden CLI with `tests/fixtures/fake-bw.sh` (via `HUSH_BW_BIN` + `FAKE_BW_DIR`).
+Live end-to-end (real account + server) was verified manually: Send receive → `pull --send`,
+vault item → `pull` scan, `--consume` trash, `listen` poll, and `run` injection (compared by hash, never printed).
+
 ## License
 
 [MIT](LICENSE). Copyright (c) 2026 Turing Labs.
-
-`signal-cli` is a separate AGPL program; hush talks to it as an external process and does not link it.

@@ -48,10 +48,6 @@ pub fn parse_body(text: &str) -> Ingest {
     Ingest::Put { name, value }
 }
 
-pub fn is_hush_ack(body: &str) -> bool {
-    body.trim_start().to_ascii_lowercase().starts_with("hush:")
-}
-
 pub fn value_from_body(body: &str) -> Result<Vec<u8>, String> {
     let mut value = body.as_bytes().to_vec();
     while value.last() == Some(&b'\n') || value.last() == Some(&b'\r') {

@@ -7,10 +7,10 @@ pub enum Error {
     NotInitialized,
     #[error("already initialized")]
     AlreadyInitialized,
-    #[error("Signal is not linked; run `hush signal link`")]
-    NotLinked,
-    #[error("signal-cli not found (install it or set HUSH_SIGNAL_CLI)")]
-    SignalCliMissing,
+    #[error("Bitwarden vault is locked or not logged in; run `bw login` then `bw unlock` and export BW_SESSION")]
+    NotLoggedIn,
+    #[error("bw not found (install the Bitwarden CLI or set HUSH_BW_BIN)")]
+    BwMissing,
     #[error("secret `{0}` not found")]
     NotFound(String),
     #[error("invalid name: {0}")]
@@ -39,8 +39,8 @@ impl Error {
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::NotFound(_) => 2,
-            Self::NotLinked | Self::NotInitialized => 3,
-            Self::SignalCliMissing => 4,
+            Self::NotLoggedIn | Self::NotInitialized => 3,
+            Self::BwMissing => 4,
             Self::CommandFailed(_, status) => status.code().unwrap_or(1),
             _ => 1,
         }

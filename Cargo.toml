@@ -3,18 +3,17 @@ name = "hush"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Agent-blind secrets: ingest over Signal, store with age, use by name"
+description = "Agent-blind secrets: ingest over Bitwarden, store with age, use by name"
 repository = "https://github.com/turinglabsorg/hush"
 homepage = "https://github.com/turinglabsorg/hush"
 readme = "README.md"
-keywords = ["secrets", "signal", "age", "cli", "agents"]
+keywords = ["secrets", "bitwarden", "age", "cli", "agents"]
 categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
 age = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive", "env"] }
-qr2term = "0.3"
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -2,7 +2,6 @@ use serde::Serialize;
 
 use crate::config::Config;
 use crate::paths::Paths;
-use crate::signal::find_signal_cli;
 use crate::vault::Vault;
 
 #[derive(Debug, Serialize)]
@@ -11,46 +10,48 @@ pub struct DoctorReport {
     pub initialized: bool,
     pub identity: bool,
     pub secrets: usize,
-    pub signal_cli: Option<String>,
-    pub signal_account: Option<String>,
-    pub allow_from: Vec<String>,
+    pub bw: Option<String>,
+    pub bitwarden_state: Option<String>,
+    pub session: bool,
     pub ok: bool,
     pub issues: Vec<String>,
 }
 
 pub fn report(paths: &Paths) -> DoctorReport {
+    use crate::bitwarden::{find_bw, status};
+
     let mut issues = Vec::new();
     let identity = paths.identity_file().exists();
-    let config = Config::load(paths).ok();
-    let initialized = identity && config.is_some();
+    let initialized = identity && Config::load(paths).is_ok();
     if !initialized {
-        issues.push("run `hush init` then `hush signal link`".into());
+        issues.push("run `hush init`".into());
     }
     let secrets = Vault::open(paths)
         .ok()
         .and_then(|vault| vault.list().ok())
         .map(|items| items.len())
         .unwrap_or(0);
-    let signal_cli = find_signal_cli().map(|path| path.display().to_string());
-    if signal_cli.is_none() {
-        issues.push("install signal-cli or set HUSH_SIGNAL_CLI".into());
+    let bw = find_bw().map(|path| path.display().to_string());
+    if bw.is_none() {
+        issues.push("install the Bitwarden CLI (`bw`) or set HUSH_BW_BIN".into());
     }
-    let signal_account = config.as_ref().and_then(|cfg| cfg.signal.account.clone());
-    if initialized && signal_account.is_none() {
-        issues.push("run `hush signal link` and scan the QR from Signal on your phone".into());
+    let bitwarden_state = status().ok().map(|st| st.state.clone());
+    match bitwarden_state.as_deref() {
+        Some("unlocked") => {}
+        Some("locked") => {
+            issues.push("vault is locked; run `bw unlock` and export BW_SESSION".into())
+        }
+        _ => issues.push("run `bw login` then `bw unlock` and export BW_SESSION".into()),
     }
-    let allow_from = config
-        .as_ref()
-        .map(|cfg| cfg.signal.allow_from.clone())
-        .unwrap_or_default();
+    let session = std::env::var_os("BW_SESSION").is_some();
     DoctorReport {
         home: paths.root().display().to_string(),
         initialized,
         identity,
         secrets,
-        signal_cli,
-        signal_account,
-        allow_from,
+        bw,
+        bitwarden_state,
+        session,
         ok: issues.is_empty(),
         issues,
     }

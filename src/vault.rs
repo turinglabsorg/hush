@@ -193,10 +193,10 @@ mod tests {
         Vault::init(&paths).unwrap();
         let vault = Vault::open(&paths).unwrap();
         vault
-            .put("stripe-prod", b"first", "signal", "self")
+            .put("stripe-prod", b"first", "bitwarden", "self")
             .unwrap();
         vault
-            .put("stripe-prod", b"second", "signal", "self")
+            .put("stripe-prod", b"second", "bitwarden", "self")
             .unwrap();
         let value = vault.get("stripe-prod").unwrap();
         assert_eq!(&value[..], b"second");
@@ -213,7 +213,7 @@ mod tests {
         Vault::init(&paths).unwrap();
         let vault = Vault::open(&paths).unwrap();
         vault
-            .put("token", b"super-secret-value", "signal", "self")
+            .put("token", b"super-secret-value", "bitwarden", "self")
             .unwrap();
         let raw = fs::read(paths.secret_file("token")).unwrap();
         let as_text = String::from_utf8_lossy(&raw);

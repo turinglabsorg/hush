@@ -3,10 +3,11 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::bitwarden;
 use crate::config::Config;
 use crate::doctor;
 use crate::paths::Paths;
-use crate::signal;
+use crate::pull::{pull, PullOptions};
 use crate::vault::{Meta, Vault};
 use crate::Error;
 
@@ -14,7 +15,7 @@ use crate::Error;
 #[command(
     name = "hush",
     version,
-    about = "Agent-blind secrets: ingest over Signal, use by name"
+    about = "Agent-blind secrets: ingest over Bitwarden, use by name"
 )]
 struct Cli {
     #[arg(long, global = true, env = "HUSH_HOME")]
@@ -49,26 +50,41 @@ enum Cmd {
     },
     /// Delete a secret by name
     Rm { name: String },
-    /// Keep receiving Signal deposits (human daemon)
+    /// Keep polling the Bitwarden vault for `hush put NAME` items (human daemon)
     Listen {
         #[arg(long)]
         json: bool,
+        /// Seconds between vault polls (minimum 5)
+        #[arg(long, default_value_t = 30)]
+        interval: u64,
+        /// Trash vault items after they are stored
+        #[arg(long)]
+        consume: bool,
     },
-    /// Fetch waiting Signal messages and store them (agent-facing)
-    #[command(alias = "recv")]
+    /// Fetch a secret from Bitwarden and store it (agent-facing)
     Pull {
-        /// Name to store. Use this when the Signal message is the raw secret.
+        /// Name to store. With `--send URL` this is required; otherwise the
+        /// agent vault is searched for an item or `hush put NAME` entry.
         #[arg(long)]
         name: Option<String>,
+        /// Receive a Bitwarden Send by URL (the URL is not secret)
+        #[arg(long)]
+        send: Option<String>,
+        /// Env var holding the Send password (passed through to `bw`)
+        #[arg(long)]
+        passwordenv: Option<String>,
+        /// File holding the Send password on its first line (passed to `bw`)
+        #[arg(long)]
+        passwordfile: Option<String>,
+        /// Trash the vault item after it is stored
+        #[arg(long)]
+        consume: bool,
         #[arg(long)]
         json: bool,
-        /// Seconds to wait for Signal (signal-cli receive timeout)
-        #[arg(long, default_value_t = 8)]
-        timeout: u64,
     },
-    /// Signal device and allowlist
+    /// Bitwarden CLI status
     #[command(subcommand)]
-    Signal(SignalCmd),
+    Bitwarden(BitwardenCmd),
     /// Check local setup
     Doctor {
         #[arg(long)]
@@ -77,17 +93,8 @@ enum Cmd {
 }
 
 #[derive(Subcommand)]
-enum SignalCmd {
-    /// Link hush as a Signal secondary device (scan the QR from your phone)
-    Link {
-        #[arg(long, default_value = "hush")]
-        name: String,
-    },
-    /// Record the Signal account number if link did not detect it
-    Account { number: String },
-    /// Allow another Signal sender to deposit secrets
-    Allow { id: String },
-    /// Show Signal link status
+enum BitwardenCmd {
+    /// Show Bitwarden login/unlock status (never secrets)
     Status {
         #[arg(long)]
         json: bool,
@@ -106,16 +113,40 @@ pub fn run() -> Result<(), Error> {
         Cmd::Info { name, json } => info(&paths, &name, json),
         Cmd::Run { name, env, command } => crate::run::run(&paths, &name, &env, &command),
         Cmd::Rm { name } => rm(&paths, &name),
-        Cmd::Listen { json } => crate::listen::listen(&paths, json),
+        Cmd::Listen {
+            json,
+            interval,
+            consume,
+        } => crate::listen::listen(&paths, json, interval, consume),
         Cmd::Pull {
             name,
+            send,
+            passwordenv,
+            passwordfile,
+            consume,
             json,
-            timeout,
-        } => crate::pull::pull(&paths, name.as_deref(), json, timeout),
-        Cmd::Signal(SignalCmd::Link { name }) => signal_link(&paths, &name),
-        Cmd::Signal(SignalCmd::Account { number }) => signal_account(&paths, &number),
-        Cmd::Signal(SignalCmd::Allow { id }) => signal_allow(&paths, &id),
-        Cmd::Signal(SignalCmd::Status { json }) => signal_status(&paths, json),
+        } => {
+            let mut send_auth = Vec::new();
+            if let Some(var) = passwordenv {
+                send_auth.push("--passwordenv".to_string());
+                send_auth.push(var);
+            }
+            if let Some(file) = passwordfile {
+                send_auth.push("--passwordfile".to_string());
+                send_auth.push(file);
+            }
+            pull(
+                &paths,
+                &PullOptions {
+                    name,
+                    send_url: send,
+                    send_auth,
+                    consume,
+                    json,
+                },
+            )
+        }
+        Cmd::Bitwarden(BitwardenCmd::Status { json }) => bitwarden_status(json),
         Cmd::Doctor { json } => doctor_cmd(&paths, json),
     }
 }
@@ -124,7 +155,7 @@ fn init(paths: &Paths) -> Result<(), Error> {
     Vault::init(paths)?;
     Config::default().save(paths)?;
     println!("initialized {}", paths.root().display());
-    println!("next: hush signal link");
+    println!("next: bw login, bw unlock, export BW_SESSION");
     Ok(())
 }
 
@@ -167,54 +198,24 @@ fn rm(paths: &Paths, name: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn signal_link(paths: &Paths, device_name: &str) -> Result<(), Error> {
-    let mut config = Config::load(paths)?;
-    let signal_cli = signal::require_signal_cli()?;
-    config.signal.device_name = device_name.to_string();
-    eprintln!("scan this QR in Signal: Settings → Linked devices");
-    let account = signal::link_device(&signal_cli, device_name)?;
-    if let Some(account) = account {
-        config.signal.account = Some(account.clone());
-        config.save(paths)?;
-        println!("linked as {account}");
-    } else {
-        config.save(paths)?;
-        println!("device linked; if the account number is missing run `hush signal account +E164`");
-    }
-    println!("next: send the secret to Signal Note to Self, then:");
-    println!("  hush pull --name NAME --json");
-    Ok(())
-}
-
-fn signal_account(paths: &Paths, number: &str) -> Result<(), Error> {
-    let mut config = Config::load(paths)?;
-    let number = number.trim();
-    if !number.starts_with('+') {
-        return Err(Error::user("account must be E.164 (start with +)"));
-    }
-    config.signal.account = Some(number.to_string());
-    config.save(paths)?;
-    println!("signal account {number}");
-    Ok(())
-}
-
-fn signal_allow(paths: &Paths, id: &str) -> Result<(), Error> {
-    let mut config = Config::load(paths)?;
-    config.allow(id);
-    config.save(paths)?;
-    println!("allow_from {:?}", config.signal.allow_from);
-    Ok(())
-}
-
-fn signal_status(paths: &Paths, _json: bool) -> Result<(), Error> {
-    let config = Config::load(paths)?;
-    let payload = serde_json::json!({
-        "account": config.signal.account,
-        "device_name": config.signal.device_name,
-        "allow_from": config.signal.allow_from,
-        "socket": config.signal.socket,
-        "signal_cli": signal::find_signal_cli().map(|p| p.display().to_string()),
-    });
+fn bitwarden_status(_json: bool) -> Result<(), Error> {
+    let bw = bitwarden::find_bw().map(|p| p.display().to_string());
+    let payload = match bitwarden::status() {
+        Ok(st) => serde_json::json!({
+            "bw": bw,
+            "server_url": st.server_url,
+            "user_email": st.user_email,
+            "state": st.state,
+            "last_sync": st.last_sync,
+            "session": std::env::var_os("BW_SESSION").is_some(),
+        }),
+        Err(err) => serde_json::json!({
+            "bw": bw,
+            "state": "unknown",
+            "session": std::env::var_os("BW_SESSION").is_some(),
+            "error": err.to_string(),
+        }),
+    };
     println!("{payload}");
     Ok(())
 }
@@ -228,15 +229,12 @@ fn doctor_cmd(paths: &Paths, json: bool) -> Result<(), Error> {
         println!("initialized: {}", report.initialized);
         println!("identity: {}", report.identity);
         println!("secrets: {}", report.secrets);
+        println!("bw: {}", report.bw.as_deref().unwrap_or("missing"));
         println!(
-            "signal-cli: {}",
-            report.signal_cli.as_deref().unwrap_or("missing")
+            "bitwarden: {}",
+            report.bitwarden_state.as_deref().unwrap_or("unknown")
         );
-        println!(
-            "signal account: {}",
-            report.signal_account.as_deref().unwrap_or("unlinked")
-        );
-        println!("allow_from: {:?}", report.allow_from);
+        println!("session: {}", report.session);
         if report.ok {
             println!("ok");
         } else {

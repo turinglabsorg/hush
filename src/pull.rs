@@ -1,177 +1,245 @@
-use std::fmt;
-
+use crate::bitwarden::{self, VaultItem};
 use crate::config::Config;
-use crate::listen::{emit, ingest, ListenEvent};
+use crate::listen::{emit, ListenEvent};
 use crate::name::parse_name;
 use crate::paths::Paths;
-use crate::protocol::{is_hush_ack, parse_body, value_from_body, Ingest};
-use crate::signal::{incoming_list_from_stdout, Incoming};
+use crate::protocol::{parse_body, value_from_body, Ingest};
 use crate::vault::Vault;
 use crate::Error;
 
-pub struct StoreOp {
-    pub name: String,
-    pub value: Vec<u8>,
-    pub sender: String,
+pub struct PullOptions {
+    pub name: Option<String>,
+    pub send_url: Option<String>,
+    /// Passthrough flags for `bw send receive` (`--passwordenv VAR`,
+    /// `--passwordfile PATH`). Never a literal password.
+    pub send_auth: Vec<String>,
+    pub consume: bool,
+    pub json: bool,
 }
 
-impl fmt::Debug for StoreOp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StoreOp")
-            .field("name", &self.name)
-            .field("bytes", &self.value.len())
-            .field("sender", &self.sender)
-            .finish()
+/// Store a Send received by URL under `name`. The URL is not secret;
+/// the Send content is validated and never printed.
+fn pull_send(
+    vault: &Vault,
+    name: &str,
+    url: &str,
+    send_auth: &[String],
+    json: bool,
+) -> Result<(), Error> {
+    let name = parse_name(name)?;
+    let raw = bitwarden::send_receive(url, send_auth)?;
+    let text = String::from_utf8(raw)
+        .map_err(|_| Error::user("Send is not valid UTF-8; hush only stores text secrets"))?;
+    let value = value_from_body(&text).map_err(Error::user)?;
+    let replaced = vault.info(&name).is_ok();
+    vault.put(&name, &value, "bitwarden-send", "self")?;
+    emit(
+        &ListenEvent::Stored {
+            name,
+            sender: "self".into(),
+            replaced,
+        },
+        json,
+    );
+    Ok(())
+}
+
+/// Store a vault item's password/notes verbatim under `wanted`.
+fn store_exact(vault: &Vault, wanted: &str, item: &VaultItem, json: bool) -> Result<(), Error> {
+    let name = parse_name(wanted)?;
+    let secret = bitwarden::item_secret(item)?;
+    let text = String::from_utf8(secret)
+        .map_err(|_| Error::user("vault item is not valid UTF-8; hush only stores text secrets"))?;
+    let value = value_from_body(&text).map_err(Error::user)?;
+    let replaced = vault.info(&name).is_ok();
+    vault.put(&name, &value, "bitwarden", "self")?;
+    emit(
+        &ListenEvent::Stored {
+            name,
+            sender: "self".into(),
+            replaced,
+        },
+        json,
+    );
+    Ok(())
+}
+
+/// Ingest one vault item whose name carries the `hush put NAME` command.
+/// The item secret is validated by the protocol parser and never printed.
+pub fn ingest_item(vault: &Vault, item: &VaultItem) -> Result<ListenEvent, Error> {
+    let secret = match bitwarden::item_secret(item) {
+        Ok(secret) => secret,
+        Err(_) => {
+            return Ok(ListenEvent::Ignored {
+                reason: format!("item `{}` has no password or notes", item.name),
+            });
+        }
+    };
+    let text = String::from_utf8(secret)
+        .map_err(|_| Error::user("vault item is not valid UTF-8; hush only stores text secrets"))?;
+    match parse_body(&format!("{}\n{}", item.name, text)) {
+        Ingest::NotForUs => Ok(ListenEvent::Ignored {
+            reason: format!("item `{}` is not a hush put item", item.name),
+        }),
+        Ingest::Error(reason) => Ok(ListenEvent::Rejected { reason }),
+        Ingest::Put { name, value } => {
+            let replaced = vault.info(&name).is_ok();
+            vault.put(&name, &value, "bitwarden", "self")?;
+            Ok(ListenEvent::Stored {
+                name,
+                sender: "self".into(),
+                replaced,
+            })
+        }
     }
 }
 
-pub fn pull(paths: &Paths, name: Option<&str>, json: bool, timeout_secs: u64) -> Result<(), Error> {
-    let config = Config::load(paths)?;
-    let account = config.signal.account.clone().ok_or(Error::NotLinked)?;
-    let vault = Vault::open(paths)?;
-    let stdout = crate::signal::receive_once(&account, timeout_secs)?;
-    let incoming = incoming_list_from_stdout(&stdout);
-    let ops = select_stores(&incoming, &config, name)?;
-    if ops.is_empty() {
-        return Err(match name {
-            Some(name) => Error::user(format!("no Signal message found to store as `{name}`")),
-            None => {
-                Error::user("no hush put messages waiting; pass --name if you sent a raw secret")
-            }
-        });
+/// Does this vault item name address secret `wanted`?
+/// Matches `hush put WANTED` (or `/hush ...`, `replace`) via the protocol parser.
+pub fn item_addresses(item_name: &str, wanted: &str) -> bool {
+    match parse_body(&format!("{item_name}\nplaceholder")) {
+        Ingest::Put { name, .. } => name.eq_ignore_ascii_case(wanted),
+        _ => false,
     }
+}
 
-    let mut stored = Vec::new();
-    for op in ops {
-        let event = persist(&vault, &op)?;
-        emit(&event, json);
-        stored.push(op.name);
+/// Pick the best vault item for `wanted`: an exact name match first,
+/// then a `hush put WANTED` command item.
+pub fn pick_item<'a>(items: &'a [VaultItem], wanted: &str) -> Option<(&'a VaultItem, bool)> {
+    if let Some(item) = items
+        .iter()
+        .find(|item| item.name.eq_ignore_ascii_case(wanted))
+    {
+        return Some((item, true));
     }
+    items
+        .iter()
+        .find(|item| item_addresses(&item.name, wanted))
+        .map(|item| (item, false))
+}
 
-    if let Some(last) = stored.last() {
-        let recipient = account.clone();
-        let _ = crate::signal::send_ack(&account, &recipient, last);
+fn pull_named(vault: &Vault, wanted: &str, consume: bool, json: bool) -> Result<(), Error> {
+    bitwarden::sync()?;
+    let items = bitwarden::list_items(Some(wanted))?;
+    let (picked, is_exact) = pick_item(&items, wanted).ok_or_else(|| {
+        Error::NotFound(format!(
+            "{wanted} (no vault item or `hush put {wanted}` found; share one via Bitwarden Send and retry with `--send URL`)"
+        ))
+    })?;
+    let item = bitwarden::get_item(&picked.id)?;
+    if is_exact {
+        store_exact(vault, wanted, &item, json)?;
+    } else {
+        match ingest_item(vault, &item)? {
+            ListenEvent::Ignored { .. } => return Err(Error::NotFound(wanted.to_string())),
+            event => emit(&event, json),
+        }
+    }
+    if consume {
+        bitwarden::delete_item(&item.id)?;
     }
     Ok(())
 }
 
-fn persist(vault: &Vault, op: &StoreOp) -> Result<ListenEvent, Error> {
-    let replaced = vault.info(&op.name).is_ok();
-    vault.put(&op.name, &op.value, "signal", &op.sender)?;
-    Ok(ListenEvent::Stored {
-        name: op.name.clone(),
-        sender: op.sender.clone(),
-        replaced,
-    })
-}
-
-pub fn select_stores(
-    incoming: &[Incoming],
-    config: &Config,
-    force_name: Option<&str>,
-) -> Result<Vec<StoreOp>, Error> {
-    let force_name = match force_name {
-        Some(name) => Some(parse_name(name)?),
-        None => None,
-    };
-    let eligible: Vec<&Incoming> = incoming
-        .iter()
-        .filter(|msg| !msg.is_group)
-        .filter(|msg| msg.allowed(&config.signal.allow_from, config.signal.account.as_deref()))
-        .filter(|msg| !is_hush_ack(&msg.body))
-        .collect();
-
-    if let Some(name) = force_name {
-        let Some(msg) = eligible.last() else {
-            return Ok(Vec::new());
-        };
-        let sender = msg.sender_label(config.signal.account.as_deref());
-        let value = match parse_body(&msg.body) {
-            Ingest::Put { value, .. } => value,
-            Ingest::NotForUs => value_from_body(&msg.body).map_err(Error::user)?,
-            Ingest::Error(reason) => return Err(Error::user(reason)),
-        };
-        return Ok(vec![StoreOp {
-            name,
-            value,
-            sender,
-        }]);
-    }
-
-    let mut ops = Vec::new();
-    for msg in eligible {
-        if let Ingest::Put { name, value } = parse_body(&msg.body) {
-            ops.push(StoreOp {
-                name,
-                value,
-                sender: msg.sender_label(config.signal.account.as_deref()),
-            });
-        }
-    }
-    Ok(ops)
-}
-
-pub fn pull_from_incoming(
-    vault: &Vault,
-    config: &Config,
-    incoming: &[Incoming],
-    force_name: Option<&str>,
-) -> Result<Vec<ListenEvent>, Error> {
-    let mut events = Vec::new();
-    if let Some(name) = force_name {
-        let ops = select_stores(incoming, config, Some(name))?;
-        for op in ops {
-            events.push(persist(vault, &op)?);
-        }
-        return Ok(events);
-    }
-    for msg in incoming {
-        match ingest(vault, config, msg)? {
+fn pull_scan(vault: &Vault, consume: bool, json: bool) -> Result<(), Error> {
+    bitwarden::sync()?;
+    let items = bitwarden::list_items(Some("hush put"))?;
+    let mut stored = 0;
+    for item in &items {
+        match ingest_item(vault, item)? {
             ListenEvent::Ignored { .. } => {}
-            event => events.push(event),
+            event => {
+                if consume {
+                    if let ListenEvent::Stored { .. } = &event {
+                        bitwarden::delete_item(&item.id)?;
+                    }
+                }
+                emit(&event, json);
+                stored += 1;
+            }
         }
     }
-    Ok(events)
+    if stored == 0 {
+        return Err(Error::user(
+            "no `hush put NAME` items found in the Bitwarden vault; share one via Send (`hush pull --name NAME --send URL`) or add a vault item named `hush put NAME`",
+        ));
+    }
+    Ok(())
+}
+
+pub fn pull(paths: &Paths, opts: &PullOptions) -> Result<(), Error> {
+    let config = Config::load(paths)?;
+    let vault = Vault::open(paths)?;
+    let consume = opts.consume || config.bitwarden.consume_after_pull;
+    if let Some(url) = opts.send_url.clone() {
+        let Some(name) = opts.name.clone() else {
+            return Err(Error::user("`--send URL` requires `--name NAME`"));
+        };
+        return pull_send(&vault, &name, &url, &opts.send_auth, opts.json);
+    }
+    if let Some(name) = opts.name.clone() {
+        return pull_named(&vault, &name, consume, opts.json);
+    }
+    pull_scan(&vault, consume, opts.json)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paths::Paths;
-    use crate::vault::Vault;
+    use crate::bitwarden::ItemLogin;
     use tempfile::TempDir;
 
-    fn msg(body: &str, sync: bool) -> Incoming {
-        Incoming {
-            sender_number: Some("+15551234567".into()),
-            sender_uuid: None,
-            body: body.into(),
-            is_sync: sync,
-            is_group: false,
+    fn item(id: &str, name: &str) -> VaultItem {
+        VaultItem {
+            id: id.into(),
+            name: name.into(),
+            login: None,
+            notes: None,
         }
     }
 
-    fn setup() -> (TempDir, Config, Vault) {
-        let dir = TempDir::new().unwrap();
-        let paths = Paths::new(dir.path().join("hush"));
-        Vault::init(&paths).unwrap();
-        let mut config = Config::default();
-        config.signal.account = Some("+15551234567".into());
-        let vault = Vault::open(&paths).unwrap();
-        (dir, config, vault)
+    #[test]
+    fn picks_exact_before_command() {
+        let items = vec![
+            item("1", "hush put db"),
+            item("2", "db"),
+            item("3", "other"),
+        ];
+        let (picked, is_exact) = pick_item(&items, "db").unwrap();
+        assert_eq!(picked.id, "2");
+        assert!(is_exact);
     }
 
     #[test]
-    fn named_pull_takes_latest_plain_secret() {
-        let (_dir, config, vault) = setup();
-        let incoming = vec![
-            msg("old", true),
-            msg("hush: stored ignore-me", true),
-            msg("sk-live-NOT-IN-CHAT", true),
-        ];
-        let events = pull_from_incoming(&vault, &config, &incoming, Some("stripe-prod")).unwrap();
-        assert_eq!(events.len(), 1);
-        match &events[0] {
+    fn picks_command_item() {
+        let items = vec![item("1", "hush put db"), item("3", "other")];
+        let (picked, is_exact) = pick_item(&items, "db").unwrap();
+        assert_eq!(picked.id, "1");
+        assert!(!is_exact);
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        let items = vec![item("1", "hush put db")];
+        assert!(pick_item(&items, "nope").is_none());
+    }
+
+    #[test]
+    fn ingests_command_item_without_echoing_secret() {
+        let dir = TempDir::new().unwrap();
+        let paths = Paths::new(dir.path().join("hush"));
+        Vault::init(&paths).unwrap();
+        let vault = Vault::open(&paths).unwrap();
+        let item = VaultItem {
+            id: "1".into(),
+            name: "hush put stripe-prod".into(),
+            login: Some(ItemLogin {
+                password: Some("sk-live-NOT-IN-CHAT".into()),
+            }),
+            notes: None,
+        };
+        let event = ingest_item(&vault, &item).unwrap();
+        match &event {
             ListenEvent::Stored { name, sender, .. } => {
                 assert_eq!(name, "stripe-prod");
                 assert_eq!(sender, "self");
@@ -182,32 +250,23 @@ mod tests {
             &vault.get("stripe-prod").unwrap()[..],
             b"sk-live-NOT-IN-CHAT"
         );
-        let dumped = serde_json::to_string(&events).unwrap();
+        let dumped = serde_json::to_string(&event).unwrap();
         assert!(!dumped.contains("sk-live"));
     }
 
     #[test]
-    fn unnamed_pull_only_protocol_messages() {
-        let (_dir, config, vault) = setup();
-        let incoming = vec![
-            msg("random chatter", true),
-            msg("hush put github-pat\nghp_secret", true),
-        ];
-        let events = pull_from_incoming(&vault, &config, &incoming, None).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(&vault.get("github-pat").unwrap()[..], b"ghp_secret");
-        assert!(vault.get("random").is_err());
-    }
-
-    #[test]
-    fn skips_acks_when_naming() {
-        let incoming = vec![msg("hush: stored stripe-prod", true)];
-        let config = {
-            let mut config = Config::default();
-            config.signal.account = Some("+15551234567".into());
-            config
+    fn ignores_plain_items() {
+        let dir = TempDir::new().unwrap();
+        let paths = Paths::new(dir.path().join("hush"));
+        Vault::init(&paths).unwrap();
+        let vault = Vault::open(&paths).unwrap();
+        let item = VaultItem {
+            id: "1".into(),
+            name: "random chatter".into(),
+            login: None,
+            notes: Some("hello".into()),
         };
-        let ops = select_stores(&incoming, &config, Some("stripe-prod")).unwrap();
-        assert!(ops.is_empty());
+        let event = ingest_item(&vault, &item).unwrap();
+        assert!(matches!(event, ListenEvent::Ignored { .. }));
     }
 }

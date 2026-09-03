@@ -1,3 +1,4 @@
+pub mod bitwarden;
 pub mod cli;
 pub mod config;
 pub mod doctor;
@@ -8,7 +9,6 @@ pub mod paths;
 pub mod protocol;
 pub mod pull;
 pub mod run;
-pub mod signal;
 pub mod vault;
 
 pub use error::Error;
