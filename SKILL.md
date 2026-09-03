@@ -93,6 +93,6 @@ hush agent-shim --dir ~/.hush/agent-bin   # put FIRST in the agent's PATH
 hush doctor --json       # must report ok
 ```
 
-For a self-hosted server, the human runs `bw config server <url>` first. An isolated agent account can use `BITWARDENCLI_APPDATA_DIR` for its own `bw` profile.
+For a self-hosted server, the human runs `bw config server <url>` first. An isolated agent account can use `BITWARDENCLI_APPDATA_DIR` for its own `bw` profile. If the agent needs its own inbox (e.g. for the Bitwarden verification mail), use [ambox.dev](https://ambox.dev) — agent-first, E2E encrypted email, open source.
 
 Do not run `hush listen` unless they explicitly ask. Pull is the agent path.

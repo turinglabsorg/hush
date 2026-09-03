@@ -1,13 +1,37 @@
 # hush
 
+```
+██╗  ██╗██╗   ██╗███████╗██╗  ██╗
+██║  ██║██║   ██║██╔════╝██║  ██║
+███████║██║   ██║███████╗███████║
+██╔══██║██║   ██║╚════██║██╔══██║
+██║  ██║╚██████╔╝███████║██║  ██║
+╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝
+```
+
 Agent-blind secrets for humans and coding agents. The value is shared over **Bitwarden** (Send link or vault item), is stored encrypted with **age**, and is used by **name**. The CLI never prints plaintext.
 
 MIT. Open source at [github.com/turinglabsorg/hush](https://github.com/turinglabsorg/hush).
 
+![How hush works](docs/architecture.svg)
+
+```
+┌────────┐  Send URL + name   ┌────────────┐piped, never printed ┌────────────┐
+│ Human  │ ─────────────────▶ │ hush pull  │ ──────────────────▶ │ age vault  │
+│ Agent  │    (chat-safe)     │ metadata   │                     │ ~/.hush/   │
+└────────┘                    └────────────┘                     └─────┬──────┘
+                                                                       │ decrypt in memory
+                                                                       ▼
+                                                               ┌────────────┐    ┌────────────────────┐
+                                                               │ hush run   │ ──▶│ transcript (blind) │
+                                                               │ --redact   │    │ [redacted by hush] │
+                                                               └────────────┘    └────────────────────┘
+```
+
 ```
 bitwarden Send link  →  hush pull --name stripe-prod --send <url>  →  ~/.hush/vault/stripe-prod.age
 agent chat: "use hush:stripe-prod"
-hush run --name stripe-prod --env STRIPE_API_KEY -- curl ...
+hush run --name stripe-prod --env STRIPE_API_KEY --redact -- curl ...
 ```
 
 The agent gets its own Bitwarden account (its own vault, optionally via `BITWARDENCLI_APPDATA_DIR`). Humans share secrets with it through **Bitwarden Send**, or through vault items (shared org collection) named `hush put NAME`.
@@ -39,6 +63,14 @@ export BW_SESSION="..."
 hush init
 hush doctor --json  # must report ok
 ```
+
+## Agent email
+
+If the agent needs its own inbox — e.g. to receive the verification mail
+for its Bitwarden account — use [ambox.dev](https://ambox.dev):
+agent-first, end-to-end encrypted email (`your-agent@ambox.dev`), open
+source. That is how the live end-to-end check above registered its test
+account.
 
 ## Deposit
 

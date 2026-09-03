@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <rect x="0" y="0" width="960" height="640" rx="12" fill="#0d1117"/>
+  <text x="480" y="44" text-anchor="middle" font-size="24" font-weight="bold" fill="#e6edf3">How hush works</text>
+  <text x="480" y="68" text-anchor="middle" font-size="13" fill="#8b949e">secrets travel Bitwarden -&gt; age vault -&gt; child env. The transcript only ever sees names.</text>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrow-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <!-- Row 1: share -->
+  <rect x="40" y="100" width="250" height="96" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="165" y="128" text-anchor="middle" font-size="15" font-weight="bold" fill="#e6edf3">Human</text>
+  <text x="165" y="150" text-anchor="middle" font-size="12" fill="#8b949e">creates a Bitwarden Send</text>
+  <text x="165" y="168" text-anchor="middle" font-size="12" fill="#8b949e">or a `hush put NAME` item</text>
+
+  <rect x="670" y="100" width="250" height="96" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="795" y="128" text-anchor="middle" font-size="15" font-weight="bold" fill="#e6edf3">Bitwarden</text>
+  <text x="795" y="150" text-anchor="middle" font-size="12" fill="#8b949e">Send link / vault item</text>
+  <text x="795" y="168" text-anchor="middle" font-size="12" fill="#8b949e">lives in the cloud</text>
+
+  <line x1="290" y1="148" x2="660" y2="148" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="475" y="138" text-anchor="middle" font-size="12" fill="#3fb950">secret travels here, never in chat</text>
+
+  <!-- chat note -->
+  <rect x="330" y="100" width="300" height="34" rx="8" fill="none" stroke="#8b949e" stroke-width="1" stroke-dasharray="5 4"/>
+  <text x="480" y="122" text-anchor="middle" font-size="12" fill="#8b949e">chat carries URL + name only (safe)</text>
+
+  <!-- Row 2: pull -->
+  <line x1="795" y1="196" x2="795" y2="252" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="480" y="252" width="270" height="96" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="615" y="280" text-anchor="middle" font-size="15" font-weight="bold" fill="#e6edf3">hush pull</text>
+  <text x="615" y="302" text-anchor="middle" font-size="12" fill="#8b949e">bw output is piped, never printed</text>
+  <text x="615" y="320" text-anchor="middle" font-size="12" fill="#3fb950">prints metadata only</text>
+  <text x="700" y="230" font-size="12" fill="#8b949e">receive / get item</text>
+
+  <!-- Row 3: vault -->
+  <line x1="615" y1="348" x2="615" y2="404" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="630" y="382" font-size="12" fill="#8b949e">encrypt at rest</text>
+  <rect x="480" y="404" width="270" height="80" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="615" y="432" text-anchor="middle" font-size="15" font-weight="bold" fill="#e6edf3">age vault ~/.hush</text>
+  <text x="615" y="454" text-anchor="middle" font-size="12" fill="#8b949e">NAME.age + NAME.meta.json</text>
+
+  <!-- Row 4: run -->
+  <line x1="480" y1="444" x2="360" y2="444" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="420" y="434" text-anchor="middle" font-size="12" fill="#8b949e">decrypt in memory</text>
+  <rect x="90" y="404" width="270" height="80" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="225" y="432" text-anchor="middle" font-size="14" font-weight="bold" fill="#e6edf3">hush run --redact</text>
+  <text x="225" y="454" text-anchor="middle" font-size="12" fill="#8b949e">scrubbed env, filtered output</text>
+
+  <line x1="225" y1="484" x2="225" y2="540" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="90" y="540" width="270" height="76" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="225" y="566" text-anchor="middle" font-size="14" font-weight="bold" fill="#e6edf3">child process</text>
+  <text x="225" y="588" text-anchor="middle" font-size="12" fill="#8b949e">gets $VAR only, nothing else</text>
+
+  <!-- transcript blind zone -->
+  <line x1="360" y1="578" x2="600" y2="578" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-dim)"/>
+  <text x="480" y="568" text-anchor="middle" font-size="12" fill="#8b949e">filtered stdout/stderr</text>
+  <rect x="600" y="524" width="320" height="92" rx="8" fill="none" stroke="#f85149" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="760" y="552" text-anchor="middle" font-size="14" font-weight="bold" fill="#f85149">agent transcript (blind)</text>
+  <text x="760" y="574" text-anchor="middle" font-size="12" fill="#8b949e">names, metadata,</text>
+  <text x="760" y="592" text-anchor="middle" font-size="12" fill="#8b949e">[redacted by hush] — never values</text>
+</svg>
