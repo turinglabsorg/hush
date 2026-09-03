@@ -80,6 +80,24 @@ enum Cmd {
         /// File holding the Send password on its first line (passed to `bw`)
         #[arg(long)]
         passwordfile: Option<String>,
+        /// Email for Sends restricted to an address (drives bw verification)
+        #[arg(long)]
+        email: Option<String>,
+        /// Shell command printing ONLY a fresh verification code (polled)
+        #[arg(long)]
+        code_cmd: Option<String>,
+        /// Env var holding a fresh verification code
+        #[arg(long)]
+        codeenv: Option<String>,
+        /// File holding a fresh verification code
+        #[arg(long)]
+        codefile: Option<String>,
+        /// Overall timeout (secs) for a gated receive, incl. the code email
+        #[arg(long, default_value_t = 300)]
+        code_timeout: u64,
+        /// Poll interval (secs) for --code-cmd
+        #[arg(long, default_value_t = 10)]
+        code_poll: u64,
         /// Trash the vault item after it is stored
         #[arg(long)]
         consume: bool,
@@ -141,6 +159,12 @@ pub fn run() -> Result<(), Error> {
             send,
             passwordenv,
             passwordfile,
+            email,
+            code_cmd,
+            codeenv,
+            codefile,
+            code_timeout,
+            code_poll,
             consume,
             json,
         } => {
@@ -159,6 +183,12 @@ pub fn run() -> Result<(), Error> {
                     name,
                     send_url: send,
                     send_auth,
+                    send_email: email,
+                    code_cmd,
+                    code_env: codeenv,
+                    code_file: codefile,
+                    code_timeout_secs: code_timeout,
+                    code_poll_secs: code_poll,
                     consume,
                     json,
                 },

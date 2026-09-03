@@ -6,6 +6,8 @@
 #   sends/<id>.name       send name (informational)
 #   sends/<id>.txt        send text content
 #   sends/<id>.password   if present, the required send password
+#   sends/<id>.email       if present, the Send is email-gated: receive
+#   sends/<id>.code         prompts for this address, then expects this code
 set -eu
 
 DIR="${FAKE_BW_DIR:-}"
@@ -77,6 +79,16 @@ case "$cmd" in
         url="${1:-}"; shift || true
         id="$(basename "$url")"
         [ -f "$DIR/sends/$id.txt" ] || fail "Send not found."
+        if [ -f "$DIR/sends/$id.email" ]; then
+          printf '? Enter your email address: ' >&2
+          IFS= read -r email || email=""
+          [ "$email" = "$(cat "$DIR/sends/$id.email")" ] || fail "Invalid email or verification code"
+          # Like the real server, the code email only lands after minting.
+          touch "$DIR/sends/$id.minted"
+          printf '? Enter the verification code sent to your email: ' >&2
+          IFS= read -r code || code=""
+          [ "$code" = "$(cat "$DIR/sends/$id.code")" ] || fail "Invalid email or verification code"
+        fi
         if [ -f "$DIR/sends/$id.password" ]; then
           expected="$(cat "$DIR/sends/$id.password")"
           given=""

@@ -63,6 +63,12 @@ impl FakeBw {
         }
     }
 
+    fn send_gated(&self, id: &str, name: &str, text: &str, email: &str, code: &str) {
+        self.send(id, name, text, None);
+        fs::write(self.dir.join("sends").join(format!("{id}.email")), email).unwrap();
+        fs::write(self.dir.join("sends").join(format!("{id}.code")), code).unwrap();
+    }
+
     fn apply(&self, cmd: &mut Command) {
         cmd.env("HUSH_BW_BIN", fixture_bw());
         cmd.env("FAKE_BW_DIR", &self.dir);
@@ -245,6 +251,146 @@ fn pull_send_with_passwordenv() {
         .output()
         .unwrap();
     assert!(!out.status.success(), "passwordless receive must fail");
+}
+
+#[test]
+fn pull_send_gated_with_code_hook() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let bw = FakeBw::new();
+    bw.send_gated(
+        "gated1",
+        "gated-secret",
+        "gated-SEND-SECRET",
+        "agent@example.com",
+        "827126",
+    );
+    // The hook contract: print ONLY the code. Like a real mailbox, the
+    // code only exists after bw mints it (the fixture drops a marker),
+    // so early polls must come back empty and hush must wait, not submit
+    // stale output.
+    let hook = format!(
+        "if [ -f {} ]; then cat {}; fi",
+        bw.dir.join("sends").join("gated1.minted").display(),
+        bw.dir.join("sends").join("gated1.code").display()
+    );
+
+    let mut cmd = bin();
+    bw.apply(&mut cmd);
+    let out = cmd
+        .args(home_args(&home))
+        .args([
+            "pull",
+            "--name",
+            "gated-secret",
+            "--send",
+            "https://vault.bitwarden.com/#/send/gated1",
+            "--email",
+            "agent@example.com",
+            "--code-cmd",
+            &hook,
+            "--code-timeout",
+            "30",
+            "--code-poll",
+            "1",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stdout={stdout} stderr={stderr}");
+    assert!(stdout.contains("gated-secret"));
+    assert!(!stdout.contains("gated-SEND-SECRET"));
+    assert!(!stdout.contains("827126"));
+    assert!(!stderr.contains("gated-SEND-SECRET"));
+    assert!(!stderr.contains("827126"));
+
+    let paths = Paths::new(home);
+    assert_eq!(
+        &Vault::open(&paths).unwrap().get("gated-secret").unwrap()[..],
+        b"gated-SEND-SECRET"
+    );
+}
+
+#[test]
+fn pull_send_gated_wrong_code_fails_without_storing() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let bw = FakeBw::new();
+    bw.send_gated(
+        "gated2",
+        "gated-secret",
+        "gated-SEND-SECRET",
+        "agent@example.com",
+        "827126",
+    );
+
+    let mut cmd = bin();
+    bw.apply(&mut cmd);
+    let out = cmd
+        .args(home_args(&home))
+        .args([
+            "pull",
+            "--name",
+            "gated-secret",
+            "--send",
+            "https://vault.bitwarden.com/#/send/gated2",
+            "--email",
+            "agent@example.com",
+            "--codeenv",
+            "HUSH_TEST_WRONG_CODE",
+            "--json",
+        ])
+        .env("HUSH_TEST_WRONG_CODE", "000000")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("rejected"), "stderr={stderr}");
+    assert!(stderr.contains("fresh code"), "stderr={stderr}");
+    assert!(!stderr.contains("gated-SEND-SECRET"));
+
+    let paths = Paths::new(home);
+    assert!(Vault::open(&paths).unwrap().get("gated-secret").is_err());
+}
+
+#[test]
+fn pull_send_gated_without_email_hints_at_flag() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let bw = FakeBw::new();
+    bw.send_gated(
+        "gated3",
+        "gated-secret",
+        "gated-SEND-SECRET",
+        "agent@example.com",
+        "827126",
+    );
+
+    // Plain receive against a gated Send fails opaquely; hush must point
+    // at --email instead of surfacing a confusing error.
+    let mut cmd = bin();
+    bw.apply(&mut cmd);
+    let out = cmd
+        .args(home_args(&home))
+        .args([
+            "pull",
+            "--name",
+            "gated-secret",
+            "--send",
+            "https://vault.bitwarden.com/#/send/gated3",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--email ADDRESS"), "stderr={stderr}");
+    assert!(!stderr.contains("gated-SEND-SECRET"));
 }
 
 #[test]

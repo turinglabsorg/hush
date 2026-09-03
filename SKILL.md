@@ -37,6 +37,24 @@ For a password-protected Send (password reaches you out of band, never in chat i
 hush pull --name <name> --send <url> --passwordenv BW_SEND_PW --json
 ```
 
+### Email-gated Sends
+
+If the Send is restricted to an email address, add `--email` plus ONE code source. hush submits the address, waits for the code mail, submits the newest code, and stores the secret — the code is piped, never printed:
+
+```bash
+hush pull --name <name> --send <url> --email <addr> --code-cmd '<hook>' --json
+```
+
+- `--code-cmd`: shell command printing ONLY the code. hush polls it (every `--code-poll` secs, default 10) until `--code-timeout` (default 300). Example hook reading the newest ambox mail (Bitwarden files its codes under `transactional`):
+
+```bash
+--code-cmd 'node ~/.claude/tools/ambox/index.js --agent robin inbox --folder transactional | head -1 | grep -oE "[0-9]{6}"'
+```
+
+- `--codeenv VAR` / `--codefile PATH` if you already hold a fresh code.
+
+Codes are single-use and minted per attempt: always submit the newest one, one pull at a time. hush snapshots the hook before minting and skips anything predating the attempt, so a slow mailbox can never feed yesterday's code. A rejected code means retry `hush pull` for a fresh one.
+
 Report the JSON (`event`, `name`). Then stop. Do not inspect the vault files.
 
 ## When the secret is already in the agent's Bitwarden vault

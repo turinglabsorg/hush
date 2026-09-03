@@ -1,4 +1,4 @@
-use crate::bitwarden::{self, VaultItem};
+use crate::bitwarden::{self, SendReceiveOptions, VaultItem};
 use crate::config::Config;
 use crate::listen::{emit, ListenEvent};
 use crate::name::parse_name;
@@ -13,6 +13,18 @@ pub struct PullOptions {
     /// Passthrough flags for `bw send receive` (`--passwordenv VAR`,
     /// `--passwordfile PATH`). Never a literal password.
     pub send_auth: Vec<String>,
+    /// Address for Sends restricted to an email (drives bw verification).
+    pub send_email: Option<String>,
+    /// Shell command printing ONLY a fresh verification code (polled).
+    pub code_cmd: Option<String>,
+    /// Env var holding a fresh verification code.
+    pub code_env: Option<String>,
+    /// File holding a fresh verification code.
+    pub code_file: Option<String>,
+    /// Overall timeout (secs) for a gated receive. Default 300.
+    pub code_timeout_secs: u64,
+    /// Poll interval (secs) for `--code-cmd`. Default 10.
+    pub code_poll_secs: u64,
     pub consume: bool,
     pub json: bool,
 }
@@ -23,11 +35,22 @@ fn pull_send(
     vault: &Vault,
     name: &str,
     url: &str,
-    send_auth: &[String],
+    opts: &PullOptions,
     json: bool,
 ) -> Result<(), Error> {
     let name = parse_name(name)?;
-    let raw = bitwarden::send_receive(url, send_auth)?;
+    let raw = bitwarden::send_receive(
+        url,
+        &SendReceiveOptions {
+            password_args: opts.send_auth.clone(),
+            email: opts.send_email.clone(),
+            code_cmd: opts.code_cmd.clone(),
+            code_env: opts.code_env.clone(),
+            code_file: opts.code_file.clone(),
+            code_timeout_secs: opts.code_timeout_secs,
+            code_poll_secs: opts.code_poll_secs,
+        },
+    )?;
     let text = String::from_utf8(raw)
         .map_err(|_| Error::user("Send is not valid UTF-8; hush only stores text secrets"))?;
     let value = value_from_body(&text).map_err(Error::user)?;
@@ -175,7 +198,7 @@ pub fn pull(paths: &Paths, opts: &PullOptions) -> Result<(), Error> {
         let Some(name) = opts.name.clone() else {
             return Err(Error::user("`--send URL` requires `--name NAME`"));
         };
-        return pull_send(&vault, &name, &url, &opts.send_auth, opts.json);
+        return pull_send(&vault, &name, &url, opts, opts.json);
     }
     if let Some(name) = opts.name.clone() {
         return pull_named(&vault, &name, consume, opts.json);

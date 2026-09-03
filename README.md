@@ -90,6 +90,16 @@ For a password-protected Send, hand the password over out of band and use `--pas
 {"event":"stored","name":"stripe-prod","sender":"self","replaced":false}
 ```
 
+**Email-gated Sends.** If the Send is restricted to an email address, pass `--email` plus one code source. hush drives the whole verification (submit address → wait for the code mail → submit newest code) in a single call; codes are single-use and minted per attempt, so always submit the newest one:
+
+```bash
+hush pull --name stripe-prod --send <url> --email agent@example.com --code-cmd '<hook prints ONLY the code>' --json
+# or: --codeenv VAR / --codefile PATH   (fresh code already in hand)
+# tune: --code-timeout 300 --code-poll 10
+```
+
+The hook is polled until it prints a code; hush ignores anything the hook returned before minting, so a slow mailbox can never feed a stale code. Rejected code → retry `hush pull` for a fresh one.
+
 **Option B — vault item.** Add an item to the agent's vault (or a shared org collection) named exactly `stripe-prod` (secret in the password or notes field), or named `hush put stripe-prod`. Then:
 
 ```bash
