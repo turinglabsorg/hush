@@ -364,3 +364,147 @@ fn bitwarden_status_reports_state() {
     assert_eq!(payload["state"], "unlocked");
     assert_eq!(payload["user_email"], "agent@example.com");
 }
+
+#[test]
+fn run_scrubs_secret_bearing_env() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let paths = Paths::new(home.clone());
+    Vault::open(&paths)
+        .unwrap()
+        .put("token", b"s3cret-value-xyz", "test", "self")
+        .unwrap();
+
+    // Even if the agent process holds a Bitwarden session, the child must
+    // not inherit it: it could otherwise call `bw` directly, bypassing hush.
+    let out = bin()
+        .env("BW_SESSION", "leak-me")
+        .env("BW_CLIENTSECRET", "leak-me")
+        .env("BITWARDENCLI_APPDATA_DIR", "/tmp/hush-leak-probe")
+        .args(home_args(&home))
+        .args(["run", "--name", "token", "--env", "SECRET", "--"])
+        .args([
+            "sh",
+            "-c",
+            r#"test -z "${BW_SESSION:-}" && test -z "${BW_CLIENTSECRET:-}" && test -z "${BITWARDENCLI_APPDATA_DIR:-}" && test "$SECRET" = s3cret-value-xyz"#,
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr={stderr}");
+}
+
+#[test]
+fn run_redact_filters_secret_from_output() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let paths = Paths::new(home.clone());
+    Vault::open(&paths)
+        .unwrap()
+        .put("token", b"s3cret-value-xyz", "test", "self")
+        .unwrap();
+
+    // The child deliberately echoes the secret: --redact must catch it on
+    // both stdout and stderr so it never reaches the transcript.
+    let out = bin()
+        .args(home_args(&home))
+        .args([
+            "run", "--name", "token", "--env", "SECRET", "--redact", "--",
+        ])
+        .args(["sh", "-c", "echo leak=$SECRET; echo err=$SECRET >&2"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stdout={stdout} stderr={stderr}");
+    assert!(stdout.contains("[redacted by hush]"), "stdout={stdout}");
+    assert!(stderr.contains("[redacted by hush]"), "stderr={stderr}");
+    assert!(!stdout.contains("s3cret-value-xyz"), "stdout={stdout}");
+    assert!(!stderr.contains("s3cret-value-xyz"), "stderr={stderr}");
+
+    // Exit codes still propagate in redact mode.
+    let out = bin()
+        .args(home_args(&home))
+        .args([
+            "run", "--name", "token", "--env", "SECRET", "--redact", "--",
+        ])
+        .args(["sh", "-c", "exit 3"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+}
+
+#[test]
+fn agent_shim_blocks_direct_bw() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("shim");
+    let out = bin()
+        .args(["agent-shim", "--dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let shim = dir.join("bw");
+    assert!(shim.is_file());
+
+    for args in [
+        vec!["get", "password", "x"],
+        vec!["send", "receive", "https://example.com/#/send/abc"],
+        vec!["status"],
+    ] {
+        let out = Command::new(&shim).args(&args).output().unwrap();
+        assert!(!out.status.success(), "args={args:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("hush"), "stderr={stderr}");
+    }
+}
+
+#[test]
+fn agent_shim_refuses_to_clobber_real_binary() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("bw"), "real binary").unwrap();
+    let out = bin()
+        .args(["agent-shim", "--dir"])
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("bw")).unwrap(),
+        "real binary"
+    );
+    let out = bin()
+        .args(["agent-shim", "--dir"])
+        .arg(tmp.path())
+        .arg("--force")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_fails_on_loose_identity_perms() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    fs::set_permissions(home.join("identity"), fs::Permissions::from_mode(0o644)).unwrap();
+
+    let bw = FakeBw::new();
+    let mut cmd = bin();
+    bw.apply(&mut cmd);
+    let out = cmd
+        .args(home_args(&home))
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(report["ok"], false);
+    let issues = report["issues"].to_string();
+    assert!(issues.contains("identity"), "issues={issues}");
+}

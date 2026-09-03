@@ -71,11 +71,42 @@ Add `--consume` to trash the vault item after it is stored. `hush listen` is the
 
 ```bash
 hush list --json
-hush run --name stripe-prod --env STRIPE_API_KEY -- \
+hush run --name stripe-prod --env STRIPE_API_KEY --redact -- \
   curl https://api.stripe.com/v1/charges
 ```
 
 There is no `show` / `get`. Decrypt happens in memory and is injected into the child environment.
+Agents always use `--redact`: child stdout/stderr is filtered so every
+occurrence of the secret becomes `[redacted by hush]`.
+
+## Agent sandbox
+
+The skill tells the agent the rules; these mechanisms enforce them.
+
+```bash
+hush agent-shim --dir ~/.hush/agent-bin   # human: put FIRST in agent PATH
+hush doctor --json                        # checks 0700/0600 modes + setup
+```
+
+- **Direct `bw` is blocked.** The shim installed as `bw` in the agent's PATH
+  refuses every call with a pointer back to hush. Without it, `bw send
+  receive <url>` needs no login and prints the secret straight into the
+  transcript. The human keeps using the real `bw`; hush itself via `HUSH_BW_BIN`.
+- **Secret-bearing env never reaches the child.** `hush run` strips
+  `BW_SESSION`, `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` and
+  `BITWARDENCLI_APPDATA_DIR`: the child gets secrets only through `--env`.
+  Otherwise a child shell could read the session and drive `bw` itself.
+- **`--redact` filters child output** (streaming, boundary-safe), so even a
+  command that echoes its input cannot leak into logs.
+- **`doctor` fails on loose permissions** (`~/.hush` must be 0700,
+  `identity` 0600) and reports whether the effective `bw` is a shim.
+
+Honest limit: on one shared Unix user these are guardrails, not a proof —
+a determined process can still exec the real `bw` by absolute path or read
+the identity file. The hard sandbox (phase 2) is a dedicated agent user
+plus a `hushd` broker owning the identity and the Bitwarden session, with
+the agent talking to it over a Unix socket and never touching key material.
+Until then: separate users where you can, shim + `--redact` everywhere.
 
 ## Layout
 

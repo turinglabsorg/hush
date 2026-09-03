@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -39,12 +39,16 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Inject a secret into a child process environment and exec it
+    /// Inject a secret into a child process environment and exec it.
+    /// Secret-bearing env vars (BW_SESSION, ...) are never inherited.
     Run {
         #[arg(long)]
         name: String,
         #[arg(long)]
         env: String,
+        /// Pipe child output and replace the secret with [redacted by hush]
+        #[arg(long)]
+        redact: bool,
         #[arg(required = true, last = true)]
         command: Vec<String>,
     },
@@ -85,6 +89,15 @@ enum Cmd {
     /// Bitwarden CLI status
     #[command(subcommand)]
     Bitwarden(BitwardenCmd),
+    /// Install a `bw` blocker shim for agent sandboxes (human setup)
+    AgentShim {
+        /// Directory to install the shim into (put it first in the agent PATH)
+        #[arg(long)]
+        dir: PathBuf,
+        /// Overwrite an existing non-shim file
+        #[arg(long)]
+        force: bool,
+    },
     /// Check local setup
     Doctor {
         #[arg(long)]
@@ -111,7 +124,12 @@ pub fn run() -> Result<(), Error> {
         Cmd::Init => init(&paths),
         Cmd::List { json } => list(&paths, json),
         Cmd::Info { name, json } => info(&paths, &name, json),
-        Cmd::Run { name, env, command } => crate::run::run(&paths, &name, &env, &command),
+        Cmd::Run {
+            name,
+            env,
+            redact,
+            command,
+        } => crate::run::run(&paths, &name, &env, &command, redact),
         Cmd::Rm { name } => rm(&paths, &name),
         Cmd::Listen {
             json,
@@ -147,6 +165,7 @@ pub fn run() -> Result<(), Error> {
             )
         }
         Cmd::Bitwarden(BitwardenCmd::Status { json }) => bitwarden_status(json),
+        Cmd::AgentShim { dir, force } => agent_shim(&dir, force),
         Cmd::Doctor { json } => doctor_cmd(&paths, json),
     }
 }
@@ -220,6 +239,13 @@ fn bitwarden_status(_json: bool) -> Result<(), Error> {
     Ok(())
 }
 
+fn agent_shim(dir: &Path, force: bool) -> Result<(), Error> {
+    let path = crate::shim::install_shim(dir, force)?;
+    println!("installed bw shim: {}", path.display());
+    println!("next: put {} first in the agent's PATH", dir.display());
+    Ok(())
+}
+
 fn doctor_cmd(paths: &Paths, json: bool) -> Result<(), Error> {
     let report = doctor::report(paths);
     if json {
@@ -230,6 +256,7 @@ fn doctor_cmd(paths: &Paths, json: bool) -> Result<(), Error> {
         println!("identity: {}", report.identity);
         println!("secrets: {}", report.secrets);
         println!("bw: {}", report.bw.as_deref().unwrap_or("missing"));
+        println!("bw shim: {}", report.bw_shim);
         println!(
             "bitwarden: {}",
             report.bitwarden_state.as_deref().unwrap_or("unknown")

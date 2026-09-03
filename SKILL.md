@@ -52,11 +52,17 @@ Add `--consume` to trash the vault item after it is stored.
 
 ## Use a stored secret
 
+Always pass `--redact`: child output is piped through a filter that
+replaces the secret with `[redacted by hush]`, so even a command that
+echoes its own input cannot leak it into the transcript.
+
 ```bash
-hush run --name <name> --env <ENV_VAR> -- <command>...
+hush run --name <name> --env <ENV_VAR> --redact -- <command>...
 ```
 
-The child process gets the env var. You only see the command's own output.
+The child process gets the env var (and nothing else secret-bearing:
+`BW_SESSION` and friends are never inherited). You only see the command's
+filtered output.
 
 ```bash
 hush list --json
@@ -81,6 +87,9 @@ bw login --apikey        # automation-friendly; or `bw login` interactively
 bw unlock                # export the printed BW_SESSION
 export BW_SESSION="..."
 hush init
+# Block direct `bw` for the agent: every `bw ...` call then fails
+# with a pointer back to hush instead of printing secrets.
+hush agent-shim --dir ~/.hush/agent-bin   # put FIRST in the agent's PATH
 hush doctor --json       # must report ok
 ```
 
