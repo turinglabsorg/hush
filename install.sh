@@ -24,7 +24,7 @@ Usage:
   ./install.sh [options]
 
 Options:
-  --version <tag>       Install a specific tag, for example v0.4.0.
+  --version <tag>       Install a specific tag, for example v0.4.1.
   --install-dir <dir>   Install directory. Default: $HOME/.local/bin.
   --source <path|url>   Install from a local file or direct URL.
   --from-source         Build with cargo from this checkout.

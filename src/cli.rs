@@ -225,7 +225,7 @@ pub fn run() -> Result<(), Error> {
                 },
             )
         }
-        Cmd::Bitwarden(BitwardenCmd::Status { json }) => bitwarden_status(json),
+        Cmd::Bitwarden(BitwardenCmd::Status { json }) => bitwarden_status(&paths, json),
         Cmd::Bitwarden(BitwardenCmd::Unlock {
             email,
             master_secret,
@@ -318,16 +318,17 @@ fn rm(paths: &Paths, name: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn bitwarden_status(_json: bool) -> Result<(), Error> {
+fn bitwarden_status(paths: &Paths, _json: bool) -> Result<(), Error> {
     let bw = bitwarden::find_bw().map(|p| p.display().to_string());
-    let payload = match bitwarden::status() {
-        Ok(st) => serde_json::json!({
+    let payload = match bitwarden::managed_status(paths) {
+        Ok((st, stored_session)) => serde_json::json!({
             "bw": bw,
             "server_url": st.server_url,
             "user_email": st.user_email,
             "state": st.state,
             "last_sync": st.last_sync,
-            "session": std::env::var_os("BW_SESSION").is_some(),
+            "session": std::env::var_os("BW_SESSION").is_some() || stored_session,
+            "stored_session": stored_session,
         }),
         Err(err) => serde_json::json!({
             "bw": bw,

@@ -24,7 +24,11 @@ shift || true
 
 case "$cmd" in
   status)
-    echo "{\"serverUrl\":\"https://vault.bitwarden.com\",\"lastSync\":\"2026-01-01T00:00:00Z\",\"userEmail\":\"agent@example.com\",\"userId\":\"fake\",\"status\":\"$state\"}"
+    reported_state="$state"
+    if [ "$state" = "locked" ] && { [ "${BW_SESSION:-}" = "session-from-login" ] || [ "${BW_SESSION:-}" = "session-from-unlock" ]; }; then
+      reported_state="unlocked"
+    fi
+    echo "{\"serverUrl\":\"https://vault.bitwarden.com\",\"lastSync\":\"2026-01-01T00:00:00Z\",\"userEmail\":\"agent@example.com\",\"userId\":\"fake\",\"status\":\"$reported_state\"}"
     ;;
   sync)
     [ "$state" = "loggedout" ] && fail "Not logged in."
