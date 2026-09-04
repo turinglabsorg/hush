@@ -8,6 +8,7 @@
 #   sends/<id>.password   if present, the required send password
 #   sends/<id>.email       if present, the Send is email-gated: receive
 #   sends/<id>.code         prompts for this address, then expects this code
+#   master-password         expected password for login/unlock
 set -eu
 
 DIR="${FAKE_BW_DIR:-}"
@@ -29,6 +30,38 @@ case "$cmd" in
     [ "$state" = "loggedout" ] && fail "Not logged in."
     [ "$state" = "locked" ] && fail "Vault is locked."
     echo "Syncing complete."
+    ;;
+  login)
+    email="${1:-}"; shift || true
+    password=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --passwordenv) var="${2:-}"; password="${!var:-}"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ -n "$email" ] || fail "Email is required."
+    [ -f "$DIR/master-password" ] || fail "Master password is not configured."
+    [ "$password" = "$(cat "$DIR/master-password")" ] || fail "Invalid master password."
+    echo "unlocked" > "$DIR/state"
+    echo "session-from-login"
+    ;;
+  unlock)
+    password=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --passwordenv) var="${2:-}"; password="${!var:-}"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ -f "$DIR/master-password" ] || fail "Master password is not configured."
+    [ "$password" = "$(cat "$DIR/master-password")" ] || fail "Invalid master password."
+    echo "unlocked" > "$DIR/state"
+    echo "session-from-unlock"
+    ;;
+  lock)
+    echo "locked" > "$DIR/state"
+    echo "Vault locked."
     ;;
   list)
     kind="${1:-}"; shift || true

@@ -41,6 +41,10 @@ impl FakeBw {
         fs::write(self.dir.join("state"), state).unwrap();
     }
 
+    fn master_password(&self, password: &str) {
+        fs::write(self.dir.join("master-password"), password).unwrap();
+    }
+
     fn item(&self, id: &str, name: &str, password: Option<&str>, notes: Option<&str>) {
         let payload = serde_json::json!({
             "id": id,
@@ -121,6 +125,217 @@ fn init_list_run_does_not_print_secret() {
     assert!(run.status.success(), "stdout={run_out} stderr={run_err}");
     assert!(!run_out.contains("s3cret-value-xyz"));
     assert!(!run_err.contains("s3cret-value-xyz"));
+}
+
+#[test]
+fn generate_stores_random_secret_without_printing_it() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+
+    let out = bin()
+        .args(home_args(&home))
+        .args(["generate", "bootstrap-password", "--bytes", "24", "--json"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stdout={stdout} stderr={stderr}");
+
+    let paths = Paths::new(home);
+    let secret = Vault::open(&paths)
+        .unwrap()
+        .get("bootstrap-password")
+        .unwrap();
+    let rendered = String::from_utf8(secret.to_vec()).unwrap();
+    assert_eq!(rendered.len(), 48);
+    assert!(rendered.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(!stdout.contains(&rendered));
+    assert!(!stderr.contains(&rendered));
+    assert!(stdout.contains("bootstrap-password"));
+    assert!(stdout.contains("\"source\":\"generated\""));
+}
+
+#[test]
+fn generate_requires_force_to_replace_existing_secret() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+
+    let first = bin()
+        .args(home_args(&home))
+        .args(["generate", "bootstrap-password"])
+        .output()
+        .unwrap();
+    assert!(first.status.success());
+    let paths = Paths::new(home.clone());
+    let original = Vault::open(&paths)
+        .unwrap()
+        .get("bootstrap-password")
+        .unwrap();
+
+    let duplicate = bin()
+        .args(home_args(&home))
+        .args(["generate", "bootstrap-password"])
+        .output()
+        .unwrap();
+    assert!(!duplicate.status.success());
+    assert_eq!(
+        &Vault::open(&paths)
+            .unwrap()
+            .get("bootstrap-password")
+            .unwrap()[..],
+        &original[..]
+    );
+
+    let replacement = bin()
+        .args(home_args(&home))
+        .args(["generate", "bootstrap-password", "--force"])
+        .output()
+        .unwrap();
+    assert!(replacement.status.success());
+    assert_ne!(
+        &Vault::open(&paths)
+            .unwrap()
+            .get("bootstrap-password")
+            .unwrap()[..],
+        &original[..]
+    );
+}
+
+#[test]
+fn bitwarden_unlock_persists_session_and_recovers_after_lock() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let paths = Paths::new(home.clone());
+    Vault::open(&paths)
+        .unwrap()
+        .put(
+            "BITWARDEN_MASTER_PASSWORD",
+            b"agent-master-password",
+            "generated",
+            "local",
+        )
+        .unwrap();
+
+    let bw = FakeBw::new();
+    bw.state("loggedout");
+    bw.master_password("agent-master-password");
+
+    let mut login = bin();
+    bw.apply(&mut login);
+    let login = login
+        .args(home_args(&home))
+        .args([
+            "bitwarden",
+            "unlock",
+            "--email",
+            "agent@example.com",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    let login_stdout = String::from_utf8_lossy(&login.stdout);
+    let login_stderr = String::from_utf8_lossy(&login.stderr);
+    assert!(
+        login.status.success(),
+        "stdout={login_stdout} stderr={login_stderr}"
+    );
+    assert!(login_stdout.contains("bitwarden-unlocked"));
+    assert!(!login_stdout.contains("agent-master-password"));
+    assert!(!login_stdout.contains("session-from-login"));
+    assert_eq!(
+        &Vault::open(&paths)
+            .unwrap()
+            .get("BITWARDEN_SESSION")
+            .unwrap()[..],
+        b"session-from-login"
+    );
+
+    bw.state("locked");
+    let mut unlock = bin();
+    bw.apply(&mut unlock);
+    let unlock = unlock
+        .args(home_args(&home))
+        .args([
+            "bitwarden",
+            "unlock",
+            "--email",
+            "agent@example.com",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    let unlock_stdout = String::from_utf8_lossy(&unlock.stdout);
+    let unlock_stderr = String::from_utf8_lossy(&unlock.stderr);
+    assert!(
+        unlock.status.success(),
+        "stdout={unlock_stdout} stderr={unlock_stderr}"
+    );
+    assert!(!unlock_stdout.contains("agent-master-password"));
+    assert!(!unlock_stdout.contains("session-from-unlock"));
+    assert_eq!(
+        &Vault::open(&paths)
+            .unwrap()
+            .get("BITWARDEN_SESSION")
+            .unwrap()[..],
+        b"session-from-unlock"
+    );
+
+    let session_use = bin()
+        .args(home_args(&home))
+        .args([
+            "run",
+            "--name",
+            "BITWARDEN_SESSION",
+            "--env",
+            "BW_SESSION",
+            "--redact",
+            "--",
+            "sh",
+            "-c",
+            "test \"$BW_SESSION\" = session-from-unlock",
+        ])
+        .output()
+        .unwrap();
+    assert!(session_use.status.success());
+}
+
+#[test]
+fn bitwarden_unlock_failure_never_prints_master_password() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let paths = Paths::new(home.clone());
+    Vault::open(&paths)
+        .unwrap()
+        .put(
+            "BITWARDEN_MASTER_PASSWORD",
+            b"wrong-master-password",
+            "generated",
+            "local",
+        )
+        .unwrap();
+
+    let bw = FakeBw::new();
+    bw.state("locked");
+    bw.master_password("correct-master-password");
+    let mut command = bin();
+    bw.apply(&mut command);
+    let output = command
+        .args(home_args(&home))
+        .args(["bitwarden", "unlock", "--email", "agent@example.com"])
+        .output()
+        .unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!output.status.success());
+    assert!(!combined.contains("wrong-master-password"));
+    assert!(!combined.contains("correct-master-password"));
 }
 
 #[test]

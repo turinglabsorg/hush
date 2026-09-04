@@ -50,7 +50,7 @@ With the agent skill and a PATH symlink:
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
 ```
 
-Pin a version with `--version v0.1.0`. Build from a checkout with `--from-source`.
+Pin a version with `--version v0.4.0`. Build from a checkout with `--from-source`.
 
 Needs the [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) on `PATH` (or `HUSH_BW_BIN`).
 
@@ -71,6 +71,35 @@ for its Bitwarden account — use [ambox.dev](https://ambox.dev):
 agent-first, end-to-end encrypted email (`your-agent@ambox.dev`), open
 source. That is how the live end-to-end check above registered its test
 account.
+
+## Generate locally
+
+When a new credential must originate on the agent machine, generate and
+encrypt it in one step. The plaintext is never written to stdout:
+
+```bash
+hush generate bitwarden-master-password --json
+```
+
+The default is 32 random bytes encoded as 64 hexadecimal characters. Use
+`--bytes` to choose 16–128 random bytes. Existing names are protected unless
+`--force` is explicitly supplied. Consume the stored value only through
+`hush run --redact`.
+
+For an agent-owned Bitwarden account, keep its master password under
+`BITWARDEN_MASTER_PASSWORD` and let Hush perform login or unlock without
+exposing either the password or the resulting session:
+
+```bash
+hush bitwarden unlock --email agent@example.com --json
+hush run --name BITWARDEN_SESSION --env BW_SESSION --redact -- \
+  hush pull --name stripe-prod --json
+```
+
+If Bitwarden locks again, rerun `hush bitwarden unlock`. Hush reads the stored
+master password, obtains a fresh session, and replaces only the encrypted
+`BITWARDEN_SESSION` entry. Custom secret names are available through
+`--master-secret` and `--session-secret`.
 
 ## Deposit
 
