@@ -68,6 +68,41 @@ hush pull --json   # one-shot scan for all `hush put NAME` items
 
 Add `--consume` to trash the vault item after it is stored.
 
+## Generate a new secret
+
+When the user explicitly authorizes creation or rotation of a credential that
+must originate on the agent machine, generate and encrypt it without exposing
+the plaintext:
+
+```bash
+hush generate <name> --json
+```
+
+The command refuses to overwrite an existing name unless `--force` is supplied.
+Use `--force` only when the user has explicitly authorized replacement. Consume
+the generated value only through `hush run --redact`.
+
+For an explicitly authorized agent-owned Bitwarden account, store the master
+password as `BITWARDEN_MASTER_PASSWORD`, then authenticate without printing the
+password or session:
+
+```bash
+hush bitwarden unlock --email <agent-email> --json
+```
+
+This stores the fresh session as `BITWARDEN_SESSION`. After any Bitwarden lock,
+rerun the same command; do not recreate the account or rotate the master
+password. Run vault-backed operations with the stored session:
+
+```bash
+hush run --name BITWARDEN_SESSION --env BW_SESSION --redact -- \
+  hush pull --name <name> --json
+```
+
+Use `--master-secret` or `--session-secret` only when the user selected custom
+names. Account deletion or master-password replacement always requires explicit
+authorization for the exact account.
+
 ## Use a stored secret
 
 Always pass `--redact`: child output is piped through a filter that

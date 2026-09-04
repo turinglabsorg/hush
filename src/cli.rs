@@ -2,6 +2,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
+use rand::{rngs::OsRng, RngCore};
+use zeroize::Zeroizing;
 
 use crate::bitwarden;
 use crate::config::Config;
@@ -36,6 +38,18 @@ enum Cmd {
     /// Show metadata for a secret (never the value)
     Info {
         name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate a cryptographically random secret and store it without printing it
+    Generate {
+        name: String,
+        /// Number of random bytes to generate before hexadecimal encoding
+        #[arg(long, default_value_t = 32)]
+        bytes: usize,
+        /// Replace an existing secret with the same name
+        #[arg(long)]
+        force: bool,
         #[arg(long)]
         json: bool,
     },
@@ -130,6 +144,17 @@ enum BitwardenCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Log in or unlock using a master password stored in Hush
+    Unlock {
+        #[arg(long)]
+        email: String,
+        #[arg(long, default_value = "BITWARDEN_MASTER_PASSWORD")]
+        master_secret: String,
+        #[arg(long, default_value = "BITWARDEN_SESSION")]
+        session_secret: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub fn run() -> Result<(), Error> {
@@ -142,6 +167,12 @@ pub fn run() -> Result<(), Error> {
         Cmd::Init => init(&paths),
         Cmd::List { json } => list(&paths, json),
         Cmd::Info { name, json } => info(&paths, &name, json),
+        Cmd::Generate {
+            name,
+            bytes,
+            force,
+            json,
+        } => generate(&paths, &name, bytes, force, json),
         Cmd::Run {
             name,
             env,
@@ -195,6 +226,12 @@ pub fn run() -> Result<(), Error> {
             )
         }
         Cmd::Bitwarden(BitwardenCmd::Status { json }) => bitwarden_status(json),
+        Cmd::Bitwarden(BitwardenCmd::Unlock {
+            email,
+            master_secret,
+            session_secret,
+            json,
+        }) => bitwarden_unlock(&paths, &email, &master_secret, &session_secret, json),
         Cmd::AgentShim { dir, force } => agent_shim(&dir, force),
         Cmd::Doctor { json } => doctor_cmd(&paths, json),
     }
@@ -234,6 +271,40 @@ fn info(paths: &Paths, name: &str, json: bool) -> Result<(), Error> {
     Ok(())
 }
 
+fn generate(paths: &Paths, name: &str, bytes: usize, force: bool, json: bool) -> Result<(), Error> {
+    if !(16..=128).contains(&bytes) {
+        return Err(Error::user("--bytes must be between 16 and 128"));
+    }
+
+    let vault = Vault::open(paths)?;
+    match vault.info(name) {
+        Ok(_) if !force => {
+            return Err(Error::user(format!(
+                "secret `{name}` already exists; use --force to replace it"
+            )))
+        }
+        Ok(_) | Err(Error::NotFound(_)) => {}
+        Err(err) => return Err(err),
+    }
+
+    let mut random = Zeroizing::new(vec![0_u8; bytes]);
+    OsRng.fill_bytes(&mut random);
+    let mut secret = Zeroizing::new(Vec::with_capacity(bytes * 2));
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in random.iter().copied() {
+        secret.push(HEX[(byte >> 4) as usize]);
+        secret.push(HEX[(byte & 0x0f) as usize]);
+    }
+
+    let meta = vault.put(name, &secret, "generated", "local")?;
+    if json {
+        println!("{}", serde_json::to_string(&meta)?);
+    } else {
+        print_meta_line(&meta);
+    }
+    Ok(())
+}
+
 fn print_meta_line(meta: &Meta) {
     println!(
         "{}\tsource={}\tsender={}\tbytes={}\tupdated={}",
@@ -266,6 +337,38 @@ fn bitwarden_status(_json: bool) -> Result<(), Error> {
         }),
     };
     println!("{payload}");
+    Ok(())
+}
+
+fn bitwarden_unlock(
+    paths: &Paths,
+    email: &str,
+    master_secret: &str,
+    session_secret: &str,
+    json: bool,
+) -> Result<(), Error> {
+    let vault = Vault::open(paths)?;
+    let master_password = vault.get(master_secret)?;
+    let master_password = std::str::from_utf8(&master_password)
+        .map_err(|_| Error::user("stored Bitwarden master password is not valid UTF-8"))?;
+    let session = bitwarden::login_and_unlock(email, master_password)?;
+    let meta = vault.put(session_secret, &session, "bitwarden-session", email)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "event": "bitwarden-unlocked",
+                "email": email,
+                "sessionSecret": meta.name,
+                "bytes": meta.bytes,
+            })
+        );
+    } else {
+        println!(
+            "Bitwarden unlocked for {email}; session stored as {}",
+            meta.name
+        );
+    }
     Ok(())
 }
 

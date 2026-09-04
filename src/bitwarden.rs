@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::Error;
 
@@ -116,6 +117,95 @@ pub fn require_unlocked() -> Result<BwStatus, Error> {
     } else {
         Err(Error::NotLoggedIn)
     }
+}
+
+pub fn login_and_unlock(email: &str, master_password: &str) -> Result<Zeroizing<Vec<u8>>, Error> {
+    if email.trim().is_empty() || !email.contains('@') {
+        return Err(Error::user("a valid Bitwarden email is required"));
+    }
+    if master_password.is_empty() {
+        return Err(Error::user("the stored Bitwarden master password is empty"));
+    }
+
+    let bw = require_bw()?;
+    let state = status()?.state;
+    let output = if state.eq_ignore_ascii_case("unlocked") {
+        run_bw_auth(&bw, &["lock"], master_password, "lock")?;
+        run_bw_auth(
+            &bw,
+            &[
+                "unlock",
+                "--passwordenv",
+                "HUSH_BITWARDEN_MASTER_PASSWORD",
+                "--raw",
+                "--nointeraction",
+            ],
+            master_password,
+            "unlock",
+        )?
+    } else if state.eq_ignore_ascii_case("locked") {
+        run_bw_auth(
+            &bw,
+            &[
+                "unlock",
+                "--passwordenv",
+                "HUSH_BITWARDEN_MASTER_PASSWORD",
+                "--raw",
+                "--nointeraction",
+            ],
+            master_password,
+            "unlock",
+        )?
+    } else {
+        run_bw_auth(
+            &bw,
+            &[
+                "login",
+                email,
+                "--passwordenv",
+                "HUSH_BITWARDEN_MASTER_PASSWORD",
+                "--raw",
+                "--nointeraction",
+            ],
+            master_password,
+            "login",
+        )?
+    };
+
+    let session = Zeroizing::new(output.trim().as_bytes().to_vec());
+    if session.is_empty() {
+        return Err(Error::user(
+            "Bitwarden authentication returned an empty session",
+        ));
+    }
+    Ok(session)
+}
+
+fn run_bw_auth(
+    bw: &Path,
+    args: &[&str],
+    master_password: &str,
+    action: &str,
+) -> Result<Zeroizing<String>, Error> {
+    let output = Command::new(bw)
+        .args(args)
+        .env_remove("BW_SESSION")
+        .env_remove("BW_CLIENTID")
+        .env_remove("BW_CLIENTSECRET")
+        .env_remove("BW_PASSWORD")
+        .env("HUSH_BITWARDEN_MASTER_PASSWORD", master_password)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+    if !output.status.success() {
+        return Err(Error::user(format!(
+            "Bitwarden {action} failed; verify the account and stored master password"
+        )));
+    }
+    Ok(Zeroizing::new(String::from_utf8(output.stdout).map_err(
+        |_| Error::user("Bitwarden returned a non-text session"),
+    )?))
 }
 
 pub fn sync() -> Result<(), Error> {
