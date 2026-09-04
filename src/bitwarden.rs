@@ -6,7 +6,11 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use crate::paths::Paths;
+use crate::vault::Vault;
 use crate::Error;
+
+pub const DEFAULT_SESSION_SECRET: &str = "BITWARDEN_SESSION";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,8 +106,48 @@ fn run_bw_at(bw: &Path, args: &[&str]) -> Result<String, Error> {
 
 pub fn status() -> Result<BwStatus, Error> {
     let out = run_bw(&["status"])?;
+    parse_status(&out)
+}
+
+pub fn managed_status(paths: &Paths) -> Result<(BwStatus, bool), Error> {
+    let Ok(vault) = Vault::open(paths) else {
+        return status().map(|status| (status, false));
+    };
+    let session = match vault.get(DEFAULT_SESSION_SECRET) {
+        Ok(session) => session,
+        Err(Error::NotFound(_)) => return status().map(|status| (status, false)),
+        Err(err) => return Err(err),
+    };
+    let session = std::str::from_utf8(&session)
+        .map_err(|_| Error::user("stored Bitwarden session is not valid UTF-8"))?;
+    status_with_session(session).map(|status| (status, true))
+}
+
+fn status_with_session(session: &str) -> Result<BwStatus, Error> {
+    let bw = require_bw()?;
+    let output = Command::new(bw)
+        .arg("status")
+        .env_remove("BW_CLIENTID")
+        .env_remove("BW_CLIENTSECRET")
+        .env_remove("BW_PASSWORD")
+        .env("BW_SESSION", session)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+    if !output.status.success() {
+        return Err(Error::user(
+            "Bitwarden status failed for the stored session; rerun `hush bitwarden unlock`",
+        ));
+    }
+    let out = String::from_utf8(output.stdout)
+        .map_err(|_| Error::user("Bitwarden status returned non-text output"))?;
+    parse_status(&out)
+}
+
+fn parse_status(out: &str) -> Result<BwStatus, Error> {
     let mut parsed: BwStatus =
-        serde_json::from_str(&out).map_err(|_| Error::user("bw status returned invalid JSON"))?;
+        serde_json::from_str(out).map_err(|_| Error::user("bw status returned invalid JSON"))?;
     if parsed.state.is_empty() {
         parsed.state = unauthenticated();
     }

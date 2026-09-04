@@ -50,7 +50,7 @@ With the agent skill and a PATH symlink:
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
 ```
 
-Pin a version with `--version v0.4.0`. Build from a checkout with `--from-source`.
+Pin a version with `--version v0.4.1`. Build from a checkout with `--from-source`.
 
 Needs the [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) on `PATH` (or `HUSH_BW_BIN`).
 

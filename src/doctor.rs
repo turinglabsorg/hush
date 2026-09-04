@@ -19,7 +19,7 @@ pub struct DoctorReport {
 }
 
 pub fn report(paths: &Paths) -> DoctorReport {
-    use crate::bitwarden::{find_bw, status};
+    use crate::bitwarden::{find_bw, managed_status};
     use crate::shim::is_shim;
 
     let mut issues = Vec::new();
@@ -43,15 +43,21 @@ pub fn report(paths: &Paths) -> DoctorReport {
     if bw.is_none() {
         issues.push("install the Bitwarden CLI (`bw`) or set HUSH_BW_BIN".into());
     }
-    let bitwarden_state = status().ok().map(|st| st.state.clone());
+    let managed_status = managed_status(paths).ok();
+    let bitwarden_state = managed_status
+        .as_ref()
+        .map(|(status, _)| status.state.clone());
     match bitwarden_state.as_deref() {
         Some("unlocked") => {}
         Some("locked") => {
-            issues.push("vault is locked; run `bw unlock` and export BW_SESSION".into())
+            issues.push("vault is locked; run `hush bitwarden unlock --email ADDRESS`".into())
         }
-        _ => issues.push("run `bw login` then `bw unlock` and export BW_SESSION".into()),
+        _ => issues.push("run `hush bitwarden unlock --email ADDRESS`".into()),
     }
-    let session = std::env::var_os("BW_SESSION").is_some();
+    let session = std::env::var_os("BW_SESSION").is_some()
+        || managed_status
+            .as_ref()
+            .is_some_and(|(_, stored_session)| *stored_session);
     DoctorReport {
         home: paths.root().display().to_string(),
         initialized,
