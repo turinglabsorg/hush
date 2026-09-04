@@ -793,6 +793,40 @@ fn bitwarden_status_validates_the_encrypted_session() {
 }
 
 #[test]
+fn bitwarden_status_prefers_an_ambient_session() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let paths = Paths::new(home.clone());
+    Vault::open(&paths)
+        .unwrap()
+        .put(
+            "BITWARDEN_SESSION",
+            b"stale-session",
+            "bitwarden-session",
+            "agent@example.com",
+        )
+        .unwrap();
+    let bw = FakeBw::new();
+    bw.state("locked");
+
+    let mut cmd = bin();
+    bw.apply(&mut cmd);
+    let out = cmd
+        .env("BW_SESSION", "session-from-unlock")
+        .args(home_args(&home))
+        .args(["bitwarden", "status", "--json"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "stdout={stdout}");
+    let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["state"], "unlocked");
+    assert_eq!(payload["session"], true);
+    assert_eq!(payload["stored_session"], false);
+}
+
+#[test]
 fn run_scrubs_secret_bearing_env() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join("hush");

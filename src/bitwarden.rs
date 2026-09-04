@@ -110,6 +110,9 @@ pub fn status() -> Result<BwStatus, Error> {
 }
 
 pub fn managed_status(paths: &Paths) -> Result<(BwStatus, bool), Error> {
+    if std::env::var_os("BW_SESSION").is_some() {
+        return status().map(|status| (status, false));
+    }
     let Ok(vault) = Vault::open(paths) else {
         return status().map(|status| (status, false));
     };
