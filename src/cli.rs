@@ -53,6 +53,19 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Share a stored secret through an expiring Bitwarden Send; print only its link
+    Send {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, default_value_t = 7)]
+        days: u16,
+        #[arg(long)]
+        max_access_count: Option<u32>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Inject a secret into a child process environment and exec it.
     /// Secret-bearing env vars (BW_SESSION, ...) are never inherited.
     Run {
@@ -173,6 +186,22 @@ pub fn run() -> Result<(), Error> {
             force,
             json,
         } => generate(&paths, &name, bytes, force, json),
+        Cmd::Send {
+            name,
+            title,
+            days,
+            max_access_count,
+            json,
+        } => {
+            let receipt =
+                crate::send::send(&paths, &name, title.as_deref(), days, max_access_count)?;
+            if json {
+                println!("{}", serde_json::to_string(&receipt)?);
+            } else {
+                println!("{}", receipt.url);
+            }
+            Ok(())
+        }
         Cmd::Run {
             name,
             env,
