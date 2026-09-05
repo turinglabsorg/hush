@@ -103,6 +103,27 @@ Use `--master-secret` or `--session-secret` only when the user selected custom
 names. Account deletion or master-password replacement always requires explicit
 authorization for the exact account.
 
+## Share a stored secret with a human
+
+When the user authorizes outgoing credential sharing, create a Bitwarden Send
+directly from a stored name. Never decrypt into a file, message body, shell
+argument, or direct `bw` command.
+
+```bash
+hush send --name SERVICE_PASSWORD --title "Service access" --days 7 --json
+```
+
+Only the Send URL and metadata are printed. Text is hidden by default, sender
+email is hidden, and both expiry and deletion are set to the requested lifetime
+(1–31 days). Add `--max-access-count N` only when an access limit is intended.
+The command accepts UTF-8 text up to 1,000 characters. It prefers an ambient
+`BW_SESSION`, otherwise it loads the encrypted `BITWARDEN_SESSION` itself.
+If the session is locked, rerun `hush bitwarden unlock --email <agent-email>`.
+
+Send the returned URL through the user's explicitly authorized messaging
+channel. Do not send the credential itself. A failed receipt can occur after
+remote creation; inspect the sender's Sends before retrying to avoid duplicates.
+
 ## Use a stored secret
 
 Always pass `--redact`: child output is piped through a filter that

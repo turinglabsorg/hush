@@ -166,6 +166,22 @@ hush box open --id ID photo --out ./photo.png
 
 `open` writes the vault and, with `--out`, the file. It prints metadata (`name`, `sender`, `bytes`, `uses_left`). It does not print the payload. The message you send is only the id, so the Signal text limit does not apply. The file can be any type.
 
+## Share a secret
+
+Create an expiring, hidden-text Bitwarden Send from an encrypted vault entry:
+
+```sh
+hush send --name SERVICE_PASSWORD --title "Service access" --days 7 --json
+```
+
+The command prints only a Send link and expiry metadata. It uses the ambient
+Bitwarden session or the encrypted `BITWARDEN_SESSION`, sends the payload through
+subprocess stdin, and never places the value in arguments or temporary files.
+The sender email is hidden. `--days` accepts 1–31 days and controls both expiration
+and deletion; `--max-access-count` optionally limits retrievals. Only nonempty
+UTF-8 text up to 1,000 characters is accepted. Raw Bitwarden failure output is
+discarded to prevent a failed command from leaking the text or session.
+
 ## Use
 
 ```bash
