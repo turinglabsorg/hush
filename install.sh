@@ -255,7 +255,7 @@ install_agent_skill() {
 build_from_source() {
   in_checkout || fail "--from-source requires a hush git checkout"
   command -v cargo >/dev/null 2>&1 || fail "cargo is required for --from-source"
-  printf 'building hush from %s\n' "$SCRIPT_DIR"
+  printf 'building hush from %s\n' "$SCRIPT_DIR" >&2
   if [ "$DRY_RUN" -eq 1 ]; then
     printf 'dry-run: would cargo build --release --locked\n'
     printf '%s\n' "$SCRIPT_DIR/target/release/hush"
