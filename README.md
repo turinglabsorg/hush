@@ -50,15 +50,13 @@ With the agent skill and a PATH symlink:
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
 ```
 
-Pin a version with `--version v0.4.1`. `hush box` is on main and is not in that release yet. On each Mac, install it from the checkout:
+Pin a version with `--version v0.5.0`. That release includes `hush box`. The installer picks the binary for the machine, so run it on the Mac Pro and on the MacBook separately. Do not copy the binary from one to the other.
 
 ```bash
-git clone git@github.com:turinglabsorg/hush.git
-cd hush
-./install.sh --from-source --agent-skill
+curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill
 ```
 
-That puts `hush` in `~/.local/bin` and the skill in `~/.agents/skills/hush`. Mac Pro and MacBook are different CPU architectures, so run this on both machines. Do not copy the binary from one to the other.
+That puts `hush` in `~/.local/bin` and the skill in `~/.agents/skills/hush`. Build from a checkout with `--from-source` only if you are not using the release.
 
 Needs the [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) on `PATH` (or `HUSH_BW_BIN`) for ingest. `hush box` does not need it.
 
