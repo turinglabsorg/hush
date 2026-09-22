@@ -1,0 +1,30 @@
+[package]
+name = "hush-directory"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Public-key directory for hush box. Private keys never leave the hush install."
+publish = false
+
+[[bin]]
+name = "hush-directory"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rand = "0.8"
+rsa = { version = "0.9", features = ["pem", "sha2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+rand = "0.8"
+tower = { version = "0.5", features = ["util"] }

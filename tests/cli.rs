@@ -355,6 +355,75 @@ fn no_show_command() {
 }
 
 #[test]
+fn box_seal_open_does_not_print_the_payload() {
+    let tmp = TempDir::new().unwrap();
+    let alice = tmp.path().join("alice");
+    let bob = tmp.path().join("bob");
+    for home in [&alice, &bob] {
+        let init = bin().args(home_args(home)).arg("init").output().unwrap();
+        assert!(
+            init.status.success(),
+            "{}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        let box_init = bin()
+            .args(home_args(home))
+            .args(["box", "init"])
+            .output()
+            .unwrap();
+        assert!(
+            box_init.status.success(),
+            "{}",
+            String::from_utf8_lossy(&box_init.stderr)
+        );
+    }
+    let payload = format!("marker-secret-{}", "x".repeat(1500));
+    let pub_file = bob.join("box.pub");
+    let mut seal = bin()
+        .args(home_args(&alice))
+        .args(["box", "seal", "--to", "bob", "-u", "1", "--pubkey-file"])
+        .arg(&pub_file)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write;
+    seal.stdin
+        .take()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+    let sealed = seal.wait_with_output().unwrap();
+    let envelope = String::from_utf8_lossy(&sealed.stdout);
+    assert!(
+        sealed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sealed.stderr)
+    );
+    assert!(!envelope.contains("marker-secret-"));
+
+    let mut open = bin()
+        .args(home_args(&bob))
+        .args(["box", "open", "long-note"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    open.stdin
+        .take()
+        .unwrap()
+        .write_all(&sealed.stdout)
+        .unwrap();
+    let opened = open.wait_with_output().unwrap();
+    let out = String::from_utf8_lossy(&opened.stdout);
+    let err = String::from_utf8_lossy(&opened.stderr);
+    assert!(opened.status.success(), "stdout={out} stderr={err}");
+    assert!(out.contains("long-note"));
+    assert!(!out.contains("marker-secret-"));
+    assert!(!err.contains("marker-secret-"));
+}
+
+#[test]
 fn help_lists_pull_flags() {
     let output = bin().arg("pull").arg("--help").output().unwrap();
     assert!(output.status.success());

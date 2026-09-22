@@ -50,9 +50,17 @@ With the agent skill and a PATH symlink:
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
 ```
 
-Pin a version with `--version v0.4.1`. Build from a checkout with `--from-source`.
+Pin a version with `--version v0.4.1`. `hush box` is on main and is not in that release yet. On each Mac, install it from the checkout:
 
-Needs the [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) on `PATH` (or `HUSH_BW_BIN`).
+```bash
+git clone git@github.com:turinglabsorg/hush.git
+cd hush
+./install.sh --from-source --agent-skill
+```
+
+That puts `hush` in `~/.local/bin` and the skill in `~/.agents/skills/hush`. Mac Pro and MacBook are different CPU architectures, so run this on both machines. Do not copy the binary from one to the other.
+
+Needs the [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) on `PATH` (or `HUSH_BW_BIN`) for ingest. `hush box` does not need it.
 
 Then:
 
@@ -138,6 +146,28 @@ hush pull --json   # one-shot scan for all `hush put NAME` items
 
 Add `--consume` to trash the vault item after it is stored. `hush listen` is the polling daemon variant (human use). Agents should use `pull`.
 
+## Exchange a file
+
+A Signal text is a poor pipe past about 1000 characters. RSA alone is worse: OAEP with a 2048-bit key wraps a few hundred bytes, not the message.
+
+`hush box` keeps the body on the two machines. It encrypts the payload with AES-256-GCM and wraps that key with the recipient's RSA public key. The directory, when you use one, stores public keys only.
+
+The public directory is `https://hush-directory-828110571677.europe-west1.run.app`. `HUSH_DIRECTORY_URL` overrides it. The keys stay on the machines. The directory only keeps the public key and the sealed file, which it cannot read.
+
+```bash
+hush box register robin
+# publishes robin@hush.sh. The same address is accepted as `robin`.
+
+hush box seal --to robin@hush.sh --file ./photo.png -u 1
+# prints {"event":"sealed","id":"...","to":"robin@hush.sh",...}
+
+hush box open --id ID photo --out ./photo.png
+```
+
+`-u` is required. Each open pulls once and the counter goes down. At 0 the directory deletes the sealed copy. Copy the same `box.key` and `box.pub` to another machine if both should open mail for that address, or register a second address and seal with `--to`.
+
+`open` writes the vault and, with `--out`, the file. It prints metadata (`name`, `sender`, `bytes`, `uses_left`). It does not print the payload. The message you send is only the id, so the Signal text limit does not apply. The file can be any type.
+
 ## Use
 
 ```bash
@@ -184,6 +214,8 @@ Until then: separate users where you can, shim + `--redact` everywhere.
 ```
 ~/.hush/config.json
 ~/.hush/identity          # age X25519, mode 600
+~/.hush/box.key           # RSA private key for box, mode 600
+~/.hush/box.pub           # RSA public key for box
 ~/.hush/vault/<name>.age
 ~/.hush/vault/<name>.meta.json
 ```

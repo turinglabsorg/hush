@@ -149,3 +149,15 @@ hush doctor --json       # must report ok
 For a self-hosted server, the human runs `bw config server <url>` first. An isolated agent account can use `BITWARDENCLI_APPDATA_DIR` for its own `bw` profile. If the agent needs its own inbox (e.g. for the Bitwarden verification mail), use [ambox.dev](https://ambox.dev) — agent-first, E2E encrypted email, open source.
 
 Do not run `hush listen` unless they explicitly ask. Pull is the agent path.
+
+## Longer than a chat message
+
+Do not split a file or a long secret into chat messages. `hush box` encrypts it locally for another hush. The directory holds the public key and the sealed copy. It cannot read the file.
+
+```bash
+hush box register <local-part>
+hush box seal --to <local-part>@hush.sh --file <path> -u <uses>
+hush box open --id <id> <vault-name>
+```
+
+`register` publishes the public key for `<local-part>@hush.sh`. The private key stays in `~/.hush/box.key`. `--to robin` and `--to robin@hush.sh` are the same address. `-u` is required. Each open consumes one use. At 0 the sealed copy is deleted. Send only the id, never the file and never the key. `open` prints metadata only. Do not read `~/.hush/box.key`.

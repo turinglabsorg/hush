@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,7 @@ use zeroize::Zeroizing;
 use crate::bitwarden;
 use crate::config::Config;
 use crate::doctor;
+use crate::exchange;
 use crate::paths::Paths;
 use crate::pull::{pull, PullOptions};
 use crate::vault::{Meta, Vault};
@@ -135,6 +137,45 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Encrypt a long payload to another hush. Signal text stops near 1000 characters; this does not.
+    #[command(name = "box", subcommand)]
+    Exchange(ExchangeCmd),
+}
+
+#[derive(Subcommand)]
+enum ExchangeCmd {
+    /// Create a local RSA box key. The private key stays on this machine.
+    Init,
+    /// Register this machine as an address such as robin@hush.sh and publish its public key.
+    Register { address: String },
+    /// Publish this machine's public key. Set HUSH_DIRECTORY_URL.
+    Publish { address: String },
+    /// Seal a file for an address. -u is how many opens are allowed; the last one deletes the copy.
+    Seal {
+        /// Recipient, for example robin@hush.sh. `robin` means the same thing.
+        #[arg(long)]
+        to: String,
+        /// File to seal. Any type. Without this, the bytes are read from stdin.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// How many times the sealed copy can be opened. Required.
+        #[arg(short = 'u', long = "uses")]
+        uses: u32,
+        /// Recipient public key PEM. Skips the directory lookup. Without HUSH_DIRECTORY_URL the envelope is written to stdout.
+        #[arg(long)]
+        pubkey_file: Option<PathBuf>,
+    },
+    /// Open a sealed box into the vault. Prints metadata only.
+    Open {
+        /// Vault name for the recovered payload.
+        name: String,
+        /// Published box id. Without it, the envelope is read from stdin.
+        #[arg(long)]
+        id: Option<String>,
+        /// Also write the payload to this path, mode 600.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -234,6 +275,30 @@ pub fn run() -> Result<(), Error> {
         }) => bitwarden_unlock(&paths, &email, &master_secret, &session_secret, json),
         Cmd::AgentShim { dir, force } => agent_shim(&dir, force),
         Cmd::Doctor { json } => doctor_cmd(&paths, json),
+        Cmd::Exchange(ExchangeCmd::Init) => exchange::init(&paths),
+        Cmd::Exchange(ExchangeCmd::Register { address }) => exchange::register(&paths, &address),
+        Cmd::Exchange(ExchangeCmd::Publish { address }) => exchange::publish(&paths, &address),
+        Cmd::Exchange(ExchangeCmd::Seal {
+            to,
+            file,
+            uses,
+            pubkey_file,
+        }) => {
+            if uses == 0 {
+                return Err(Error::user("box seal requires -u greater than 0"));
+            }
+            let pem = match &pubkey_file {
+                Some(path) => fs::read_to_string(path)?,
+                None => exchange::fetch_public_key(&to)?,
+            };
+            let (payload, filename) = exchange::read_payload(file.as_deref())?;
+            let publish = pubkey_file.is_none();
+            exchange::seal_output(&to, &pem, &payload, uses, filename.as_deref(), publish)
+        }
+        Cmd::Exchange(ExchangeCmd::Open { name, id, out }) => match id {
+            Some(id) => exchange::open_id(&paths, &id, &name, out.as_deref()),
+            None => exchange::open_stdin(&paths, &name, out.as_deref()),
+        },
     }
 }
 

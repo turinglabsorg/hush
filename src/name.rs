@@ -28,6 +28,22 @@ pub fn parse_name(raw: &str) -> Result<String, Error> {
     Ok(name.to_string())
 }
 
+/// A hush box address. `robin` and `robin@hush.sh` are the same address.
+pub fn parse_box_address(raw: &str) -> Result<String, Error> {
+    let raw = raw.trim();
+    let local = if let Some(local) = raw.strip_suffix("@hush.sh") {
+        local
+    } else if raw.contains('@') {
+        return Err(Error::InvalidName(
+            "box addresses use @hush.sh, for example robin@hush.sh".into(),
+        ));
+    } else {
+        raw
+    };
+    let local = parse_name(local)?;
+    Ok(format!("{local}@hush.sh"))
+}
+
 pub fn parse_env_name(raw: &str) -> Result<String, Error> {
     let name = raw.trim();
     let mut chars = name.chars();
@@ -61,6 +77,15 @@ mod tests {
         assert!(parse_name("").is_err());
         assert!(parse_name("1abc").is_err());
         assert!(parse_name("has space").is_err());
+        assert_eq!(
+            parse_box_address("robin").unwrap(),
+            "robin@hush.sh"
+        );
+        assert_eq!(
+            parse_box_address("robin@hush.sh").unwrap(),
+            "robin@hush.sh"
+        );
+        assert!(parse_box_address("robin@example.com").is_err());
     }
 
     #[test]

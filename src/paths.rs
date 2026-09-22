@@ -35,6 +35,14 @@ impl Paths {
         self.root.join("identity")
     }
 
+    pub fn box_key_file(&self) -> PathBuf {
+        self.root.join("box.key")
+    }
+
+    pub fn box_pub_file(&self) -> PathBuf {
+        self.root.join("box.pub")
+    }
+
     pub fn vault_dir(&self) -> PathBuf {
         self.root.join("vault")
     }
