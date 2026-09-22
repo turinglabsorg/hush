@@ -161,7 +161,7 @@ enum ExchangeCmd {
         /// How many times the sealed copy can be opened. Required.
         #[arg(short = 'u', long = "uses")]
         uses: u32,
-        /// Recipient public key PEM. Skips the directory lookup. Without HUSH_DIRECTORY_URL the envelope is written to stdout.
+        /// Recipient public key PEM. Skips the directory and writes the envelope to stdout.
         #[arg(long)]
         pubkey_file: Option<PathBuf>,
     },
