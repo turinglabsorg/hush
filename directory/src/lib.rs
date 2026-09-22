@@ -45,16 +45,42 @@ impl Store {
         }
     }
 
-    async fn insert_box(&self, id: String, to: String, uses: u32, file: Option<String>, envelope: serde_json::Value) -> Result<(), DirectoryError> {
+    async fn insert_box(
+        &self,
+        id: String,
+        to: String,
+        uses: u32,
+        file: Option<String>,
+        envelope: serde_json::Value,
+    ) -> Result<(), DirectoryError> {
         match self {
-            Self::Memory(store) => store.insert_box(id, SealedBox { to, uses, file, envelope }).await,
-            Self::Firestore(store) => store.insert_box(&id, &to, uses, file.as_deref(), &envelope).await,
+            Self::Memory(store) => {
+                store
+                    .insert_box(
+                        id,
+                        SealedBox {
+                            to,
+                            uses,
+                            file,
+                            envelope,
+                        },
+                    )
+                    .await
+            }
+            Self::Firestore(store) => {
+                store
+                    .insert_box(&id, &to, uses, file.as_deref(), &envelope)
+                    .await
+            }
         }
     }
 
     async fn pull_box(&self, id: &str) -> Result<Option<(serde_json::Value, u32)>, DirectoryError> {
         match self {
-            Self::Memory(store) => Ok(store.pull_box(id).await?.map(|(envelope, left, _)| (envelope, left))),
+            Self::Memory(store) => Ok(store
+                .pull_box(id)
+                .await?
+                .map(|(envelope, left, _)| (envelope, left))),
             Self::Firestore(store) => store.pull_box(id).await,
         }
     }
@@ -98,7 +124,10 @@ impl MemoryStore {
         Ok(())
     }
 
-    async fn pull_box(&self, id: &str) -> Result<Option<(serde_json::Value, u32, String)>, DirectoryError> {
+    async fn pull_box(
+        &self,
+        id: &str,
+    ) -> Result<Option<(serde_json::Value, u32, String)>, DirectoryError> {
         let mut boxes = self.boxes.lock().await;
         let Some(record) = boxes.get_mut(id) else {
             return Ok(None);
@@ -294,19 +323,26 @@ impl FirestoreStore {
             .and_then(|value| serde_json::from_str(value).ok())
             .ok_or_else(|| DirectoryError::Upstream("firestore box has no envelope".into()))?;
         if uses == 0 {
-            let _ = self.client.delete(self.box_url(id)).bearer_auth(&token).send().await;
+            let _ = self
+                .client
+                .delete(self.box_url(id))
+                .bearer_auth(&token)
+                .send()
+                .await;
             return Ok(None);
         }
         let left = uses - 1;
         if left == 0 {
-            let _ = self.client.delete(self.box_url(id)).bearer_auth(token).send().await;
+            let _ = self
+                .client
+                .delete(self.box_url(id))
+                .bearer_auth(token)
+                .send()
+                .await;
         } else {
             let _ = self
                 .client
-                .patch(format!(
-                    "{}?updateMask.fieldPaths=uses",
-                    self.box_url(id)
-                ))
+                .patch(format!("{}?updateMask.fieldPaths=uses", self.box_url(id)))
                 .bearer_auth(token)
                 .json(&serde_json::json!({
                     "fields": { "uses": { "integerValue": left.to_string() } }

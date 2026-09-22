@@ -77,14 +77,8 @@ mod tests {
         assert!(parse_name("").is_err());
         assert!(parse_name("1abc").is_err());
         assert!(parse_name("has space").is_err());
-        assert_eq!(
-            parse_box_address("robin").unwrap(),
-            "robin@hush.sh"
-        );
-        assert_eq!(
-            parse_box_address("robin@hush.sh").unwrap(),
-            "robin@hush.sh"
-        );
+        assert_eq!(parse_box_address("robin").unwrap(), "robin@hush.sh");
+        assert_eq!(parse_box_address("robin@hush.sh").unwrap(), "robin@hush.sh");
         assert!(parse_box_address("robin@example.com").is_err());
     }
 

@@ -220,7 +220,9 @@ pub fn fetch_public_key(name: &str) -> Result<String, Error> {
         .ok_or_else(|| Error::user(format!("directory has no public key for {name}")))
 }
 
-pub fn read_payload(file: Option<&std::path::Path>) -> Result<(Zeroizing<Vec<u8>>, Option<String>), Error> {
+pub fn read_payload(
+    file: Option<&std::path::Path>,
+) -> Result<(Zeroizing<Vec<u8>>, Option<String>), Error> {
     let mut plaintext = Zeroizing::new(Vec::new());
     let filename = if let Some(path) = file {
         let mut handle = fs::File::open(path)?;
@@ -241,7 +243,12 @@ pub fn read_payload(file: Option<&std::path::Path>) -> Result<(Zeroizing<Vec<u8>
     Ok((plaintext, filename))
 }
 
-pub fn publish_envelope(to: &str, uses: u32, envelope: &[u8], file: Option<&str>) -> Result<String, Error> {
+pub fn publish_envelope(
+    to: &str,
+    uses: u32,
+    envelope: &[u8],
+    file: Option<&str>,
+) -> Result<String, Error> {
     if uses == 0 {
         return Err(Error::user("box seal requires -u greater than 0"));
     }
@@ -295,7 +302,14 @@ pub fn pull_envelope(id: &str) -> Result<(Vec<u8>, u32), Error> {
     Ok((envelope, uses_left))
 }
 
-pub fn seal_output(to: &str, public_pem: &str, plaintext: &[u8], uses: u32, file: Option<&str>, publish: bool) -> Result<(), Error> {
+pub fn seal_output(
+    to: &str,
+    public_pem: &str,
+    plaintext: &[u8],
+    uses: u32,
+    file: Option<&str>,
+    publish: bool,
+) -> Result<(), Error> {
     let envelope = seal_to_pem(plaintext, to, public_pem)?;
     if publish {
         let id = publish_envelope(to, uses, &envelope, file)?;
@@ -317,7 +331,12 @@ pub fn seal_output(to: &str, public_pem: &str, plaintext: &[u8], uses: u32, file
     Ok(())
 }
 
-pub fn open_id(paths: &Paths, id: &str, name: &str, out: Option<&std::path::Path>) -> Result<(), Error> {
+pub fn open_id(
+    paths: &Paths,
+    id: &str,
+    name: &str,
+    out: Option<&std::path::Path>,
+) -> Result<(), Error> {
     let (raw, uses_left) = pull_envelope(id)?;
     open_bytes(paths, &raw, name, out, Some(uses_left))
 }
