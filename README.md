@@ -50,7 +50,7 @@ With the agent skill and a PATH symlink:
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
 ```
 
-Pin a version with `--version v0.5.0`. That release includes `hush box`. The installer picks the binary for the machine, so run it on the Mac Pro and on the MacBook separately. Do not copy the binary from one to the other.
+Pin a version with `--version v0.6.0`. That release includes `hush box` and `hush send`. The installer picks the binary for the machine, so run it on the Mac Pro and on the MacBook separately. Do not copy the binary from one to the other.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill
