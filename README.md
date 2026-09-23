@@ -50,7 +50,7 @@ With the agent skill and a PATH symlink:
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill --path-link
 ```
 
-Pin a version with `--version v0.5.0`. That release includes `hush box`. The installer picks the binary for the machine, so run it on the Mac Pro and on the MacBook separately. Do not copy the binary from one to the other.
+Pin a version with `--version v0.6.0`. That release includes `hush box` and `hush send`. The installer picks the binary for the machine, so run it on the Mac Pro and on the MacBook separately. Do not copy the binary from one to the other.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill
@@ -165,6 +165,22 @@ hush box open --id ID photo --out ./photo.png
 `-u` is required. Each open pulls once and the counter goes down. At 0 the directory deletes the sealed copy. Copy the same `box.key` and `box.pub` to another machine if both should open mail for that address, or register a second address and seal with `--to`.
 
 `open` writes the vault and, with `--out`, the file. It prints metadata (`name`, `sender`, `bytes`, `uses_left`). It does not print the payload. The message you send is only the id, so the Signal text limit does not apply. The file can be any type.
+
+## Share a secret
+
+Create an expiring, hidden-text Bitwarden Send from an encrypted vault entry:
+
+```sh
+hush send --name SERVICE_PASSWORD --title "Service access" --days 7 --json
+```
+
+The command prints only a Send link and expiry metadata. It uses the ambient
+Bitwarden session or the encrypted `BITWARDEN_SESSION`, sends the payload through
+subprocess stdin, and never places the value in arguments or temporary files.
+The sender email is hidden. `--days` accepts 1–31 days and controls both expiration
+and deletion; `--max-access-count` optionally limits retrievals. Only nonempty
+UTF-8 text up to 1,000 characters is accepted. Raw Bitwarden failure output is
+discarded to prevent a failed command from leaking the text or session.
 
 ## Use
 
