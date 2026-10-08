@@ -249,7 +249,21 @@ install_agent_skill() {
   mkdir -p "$skill_dir"
   install_skill_file "SKILL.md" "$skill_dir/SKILL.md"
   install_skill_file "README.md" "$skill_dir/README.md"
-  printf 'agent skill installed: %s\n' "$skill_dir"
+  ingest_dir="$(dirname "$skill_dir")/hush-ingest"
+  mkdir -p "$ingest_dir"
+  install_skill_file "skills/hush-ingest/SKILL.md" "$ingest_dir/SKILL.md"
+  # Claude Code reads only ~/.claude/skills: link the skills there instead of keeping
+  # a second copy. Codex reads ~/.agents/skills, so its old copy would show twice.
+  claude_skills="${CLAUDE_HOME:-$HOME/.claude}/skills"
+  if [ -d "$(dirname "$claude_skills")" ]; then
+    mkdir -p "$claude_skills"
+    for name in hush hush-ingest; do
+      rm -rf "$claude_skills/$name"
+      ln -s "$(dirname "$skill_dir")/$name" "$claude_skills/$name"
+    done
+  fi
+  rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/hush"
+  printf 'agent skill installed: %s (+ hush-ingest)\n' "$skill_dir"
 }
 
 build_from_source() {

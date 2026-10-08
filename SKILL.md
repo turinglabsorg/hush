@@ -25,6 +25,8 @@ The ONLY way for you to ask for, receive, read, or use a secret is hush.
 
 ## When they share a Bitwarden Send link
 
+Storing it is mechanical: hand the URL and the name to the `hush-ingest` skill, which runs it on the agent's smallest model; that skill (or you, when you are that small agent) runs the commands below.
+
 They create a Send in Bitwarden and paste only the **URL** (URLs are not secret). You only get the **name**.
 
 ```bash
