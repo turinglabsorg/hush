@@ -56,7 +56,7 @@ Pin a version with `--version v0.6.0`. That release includes `hush box` and `hus
 curl -fsSL https://raw.githubusercontent.com/turinglabsorg/hush/main/install.sh | sh -s -- --agent-skill
 ```
 
-That puts `hush` in `~/.local/bin` and the skill in `~/.agents/skills/hush`. Build from a checkout with `--from-source` only if you are not using the release.
+That puts `hush` in `~/.local/bin` and the skills in `~/.agents/skills/hush` and `~/.agents/skills/hush-ingest` (Send ingestion on the agent's smallest model), linked from `~/.claude/skills` for Claude Code. Build from a checkout with `--from-source` only if you are not using the release.
 
 Needs the [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) on `PATH` (or `HUSH_BW_BIN`) for ingest. `hush box` does not need it.
 
