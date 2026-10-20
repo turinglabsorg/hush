@@ -139,6 +139,14 @@ starting the command. Invoke this at the actual verification step; a
 long-running child does not receive refreshed codes. Hush does not handle
 SMS, push approvals or passkeys through TOTP.
 
+## Bitwarden CLI compatibility
+
+A live Send check with Bitwarden CLI 2026.6.0 failed before creation with an
+uninitialized `userClient` error. The same operation succeeded with the official
+2026.9.1 binary. Select a verified alternate CLI through `HUSH_BW_BIN`; keep the
+normal hush pipeline and inspect existing Sends before retrying an uncertain
+creation. Never print raw Bitwarden failure payloads or bypass hush.
+
 ## Deposit
 
 **Option A — Bitwarden Send (recommended).** Create a text Send with the secret, then in the agent chat paste only the Send **URL** (URLs are not secret) plus the name:
