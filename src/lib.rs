@@ -12,6 +12,7 @@ pub mod pull;
 pub mod run;
 pub mod send;
 pub mod shim;
+pub mod totp;
 pub mod vault;
 
 pub use error::Error;

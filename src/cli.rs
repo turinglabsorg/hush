@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
@@ -78,9 +78,15 @@ enum Cmd {
         /// Pipe child output and replace the secret with [redacted by hush]
         #[arg(long)]
         redact: bool,
+        /// Inject a fresh TOTP code instead of the stored seed; requires --redact
+        #[arg(long, requires = "redact")]
+        totp: bool,
         #[arg(required = true, last = true)]
         command: Vec<String>,
     },
+    /// Store an authenticator enrollment from stdin; never display seeds or codes
+    #[command(subcommand)]
+    Totp(TotpCmd),
     /// Delete a secret by name
     Rm { name: String },
     /// Keep polling the Bitwarden vault for `hush put NAME` items (human daemon)
@@ -153,6 +159,19 @@ enum Cmd {
     /// Encrypt a long payload to another hush. Signal text stops near 1000 characters; this does not.
     #[command(name = "box", subcommand)]
     Exchange(ExchangeCmd),
+}
+
+#[derive(Subcommand)]
+enum TotpCmd {
+    /// Encrypt a base32 seed or otpauth://totp URI supplied through a pipe
+    Store {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -247,8 +266,42 @@ pub fn run() -> Result<(), Error> {
             name,
             env,
             redact,
+            totp,
             command,
-        } => crate::run::run(&paths, &name, &env, &command, redact),
+        } => crate::run::run_with_totp(&paths, &name, &env, &command, redact, totp),
+        Cmd::Totp(TotpCmd::Store { name, force, json }) => {
+            let vault = Vault::open(&paths)?;
+            match vault.info(&name) {
+                Ok(_) if !force => {
+                    return Err(Error::user(
+                        "secret already exists; replacement requires --force",
+                    ))
+                }
+                Ok(_) | Err(Error::NotFound(_)) => {}
+                Err(error) => return Err(error),
+            }
+            if std::io::stdin().is_terminal() {
+                return Err(Error::user(
+                    "pipe TOTP enrollment through stdin; do not type it into a terminal",
+                ));
+            }
+            let mut seed = Zeroizing::new(String::new());
+            std::io::stdin()
+                .take(8193)
+                .read_to_string(&mut seed)
+                .map_err(|_| Error::user("could not read UTF-8 TOTP enrollment from stdin"))?;
+            crate::totp::Totp::parse(&seed)?;
+            let meta = vault.put(&name, seed.trim().as_bytes(), "totp", "self")?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"event": "totp-stored", "name": meta.name})
+                );
+            } else {
+                println!("TOTP enrollment stored as {}", meta.name);
+            }
+            Ok(())
+        }
         Cmd::Rm { name } => rm(&paths, &name),
         Cmd::Listen {
             json,

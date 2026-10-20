@@ -107,6 +107,38 @@ master password, obtains a fresh session, and replaces only the encrypted
 `BITWARDEN_SESSION` entry. Custom secret names are available through
 `--master-secret` and `--session-secret`.
 
+## Authenticator codes
+
+This requires a build containing the TOTP commands (0.7.0-dev or later).
+The v0.6.0 release does not include them; build this checkout with
+`./install.sh --from-source --agent-skill` until a release is available.
+
+Hush can keep a TOTP enrollment encrypted and generate its current numeric
+code for an authorized login. It accepts a base32 seed or an
+`otpauth://totp` URI, with SHA-1, SHA-256 or SHA-512, 6 or 8 digits, and a
+15–120 second period. A plain seed uses the Google Authenticator defaults:
+SHA-1, 6 digits, 30 seconds.
+
+Capture the enrollment directly from the provider into a pipe, without
+printing it, saving a QR screenshot or writing a plaintext file. The
+receiving command is `hush totp store --name SERVICE_TOTP --json`; it reads
+stdin, encrypts the enrollment and prints metadata only. An existing name
+requires explicit `--force` to replace it. Human-supplied enrollments may
+also be received through the usual Bitwarden Send workflow.
+
+Inject the code directly into the login process:
+
+```bash
+hush run --name SERVICE_TOTP --env LOGIN_OTP --totp --redact -- login-command
+```
+
+The child receives only the numeric code, never the seed. `--redact` is
+required and masks both the stored enrollment and generated code on stdout
+and stderr. Codes with less than ten seconds remaining are renewed before
+starting the command. Invoke this at the actual verification step; a
+long-running child does not receive refreshed codes. Hush does not handle
+SMS, push approvals or passkeys through TOTP.
+
 ## Deposit
 
 **Option A — Bitwarden Send (recommended).** Create a text Send with the secret, then in the agent chat paste only the Send **URL** (URLs are not secret) plus the name:

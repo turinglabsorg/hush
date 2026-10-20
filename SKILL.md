@@ -70,6 +70,32 @@ hush pull --json   # one-shot scan for all `hush put NAME` items
 
 Add `--consume` to trash the vault item after it is stored.
 
+## Authenticator codes (TOTP)
+
+Requires a build with `hush run --totp` and `hush totp store` (0.7.0-dev or
+later). Check `hush run --help`; do not work around missing support by
+displaying a seed or code.
+
+For an account the user authorizes you to configure, a provider-issued
+authenticator enrollment can be captured by a child process and piped
+directly into `hush totp store --name SERVICE_TOTP --json`. Never expose the
+seed, QR image, otpauth URI or codes in a transcript, screenshot or plaintext
+file. Read only the resulting name/event metadata. Human-provided seeds
+must still arrive through Bitwarden Send or an existing vault item.
+
+Use the enrollment only by name:
+
+```bash
+hush run --name SERVICE_TOTP --env LOGIN_OTP --totp --redact -- <login-command...>
+```
+
+The child receives the fresh numeric code and reads it directly from the
+environment. Both the seed and code are redacted from child output. Invoke
+this only when the login is ready to accept the code. There is no command
+to display the code or seed. Do not replace an existing enrollment with
+`--force` without explicit authorization. TOTP does not automate SMS or
+push approval and does not store passkeys.
+
 ## Generate a new secret
 
 When the user explicitly authorizes creation or rotation of a credential that

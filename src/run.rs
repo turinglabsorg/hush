@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use zeroize::Zeroizing;
 
 use crate::name::parse_env_name;
 use crate::paths::Paths;
@@ -28,6 +29,17 @@ pub fn run(
     command: &[String],
     redact: bool,
 ) -> Result<(), Error> {
+    run_with_totp(paths, name, env_name, command, redact, false)
+}
+
+pub fn run_with_totp(
+    paths: &Paths,
+    name: &str,
+    env_name: &str,
+    command: &[String],
+    redact: bool,
+    totp: bool,
+) -> Result<(), Error> {
     if command.is_empty() {
         return Err(Error::user("missing command after `--`"));
     }
@@ -37,14 +49,27 @@ pub fn run(
     let secret_str = std::str::from_utf8(&secret).map_err(|_| {
         Error::user("secret is not valid UTF-8; hush run only injects text secrets")
     })?;
+    if totp && !redact {
+        return Err(Error::user("TOTP injection requires --redact"));
+    }
+    let code = if totp {
+        crate::totp::Totp::parse(secret_str)?.current()?
+    } else {
+        Zeroizing::new(String::new())
+    };
+    let injected = if totp { code.as_str() } else { secret_str };
     let mut child = Command::new(&command[0]);
     child.args(&command[1..]);
     for var in SCRUBBED_ENV_VARS {
         child.env_remove(var);
     }
-    child.env(&env_name, OsStr::new(secret_str));
+    child.env(&env_name, OsStr::new(injected));
     if redact {
-        return run_redacted(&mut child, secret_str.as_bytes());
+        let mut secrets = vec![secret_str.as_bytes()];
+        if totp {
+            secrets.push(code.as_bytes());
+        }
+        return run_redacted(&mut child, &secrets);
     }
     child.stdin(Stdio::inherit());
     child.stdout(Stdio::inherit());
@@ -72,7 +97,7 @@ pub fn run(
 /// secret in its output with `[redacted by hush]`. Agents should always use
 /// this mode: a command that echoes its own input would otherwise leak the
 /// secret into the transcript.
-fn run_redacted(child: &mut Command, secret: &[u8]) -> Result<(), Error> {
+fn run_redacted(child: &mut Command, secrets: &[&[u8]]) -> Result<(), Error> {
     let mut spawned = child
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
@@ -83,12 +108,12 @@ fn run_redacted(child: &mut Command, secret: &[u8]) -> Result<(), Error> {
     std::thread::scope(|scope| {
         scope.spawn(|| {
             if let Some(out) = stdout.as_mut() {
-                pump_redacted(out, &StdoutTarget, secret);
+                pump_redacted(out, &StdoutTarget, secrets);
             }
         });
         scope.spawn(|| {
             if let Some(err) = stderr.as_mut() {
-                pump_redacted(err, &StderrTarget, secret);
+                pump_redacted(err, &StderrTarget, secrets);
             }
         });
     });
@@ -102,15 +127,18 @@ fn run_redacted(child: &mut Command, secret: &[u8]) -> Result<(), Error> {
 
 /// Stream `reader` to stdout/stderr with secret occurrences redacted.
 /// The target (stdout vs stderr) is selected by the caller.
-fn pump_redacted<R: Read>(reader: &mut R, writer: &impl WriteTarget, secret: &[u8]) {
-    let mut redactor = Redactor::new(secret);
+fn pump_redacted<R: Read>(reader: &mut R, writer: &impl WriteTarget, secrets: &[&[u8]]) {
+    let mut redactors: Vec<Redactor> = secrets.iter().map(|secret| Redactor::new(secret)).collect();
     let mut buf = [0u8; 8192];
     let mut handle = writer.lock();
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                let safe = redactor.push(&buf[..n]);
+                let mut safe = buf[..n].to_vec();
+                for redactor in &mut redactors {
+                    safe = redactor.push(&safe);
+                }
                 if handle.write_all(&safe).is_err() {
                     break;
                 }
@@ -118,8 +146,13 @@ fn pump_redacted<R: Read>(reader: &mut R, writer: &impl WriteTarget, secret: &[u
             Err(_) => break,
         }
     }
-    let tail = redactor.finish();
-    let _ = handle.write_all(&tail);
+    while !redactors.is_empty() {
+        let mut tail = redactors.remove(0).finish();
+        for redactor in &mut redactors {
+            tail = redactor.push(&tail);
+        }
+        let _ = handle.write_all(&tail);
+    }
 }
 
 trait WriteTarget {
