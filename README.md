@@ -107,6 +107,18 @@ master password, obtains a fresh session, and replaces only the encrypted
 `BITWARDEN_SESSION` entry. Custom secret names are available through
 `--master-secret` and `--session-secret`.
 
+### Account password requirements
+
+For account registration requiring upper/lowercase letters, digits and a
+special character, use
+`hush generate SERVICE_PASSWORD --password --json`. The encrypted value contains
+32 random characters by default and always includes all four classes.
+`--bytes 16..128` selects the character count in this mode. Without
+`--password`, generation retains its hexadecimal encoding and byte-count
+behavior. Generation never prints the password and refuses replacement without
+`--force`. Consume the exact stored value through `hush run --redact`; do not
+append characters outside the vault or reuse another service's password.
+
 ## Authenticator codes
 
 This requires a build containing the TOTP commands (0.7.0-dev or later).

@@ -3,7 +3,7 @@ use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng, RngCore};
 use zeroize::Zeroizing;
 
 use crate::bitwarden;
@@ -46,9 +46,12 @@ enum Cmd {
     /// Generate a cryptographically random secret and store it without printing it
     Generate {
         name: String,
-        /// Number of random bytes to generate before hexadecimal encoding
+        /// Random byte count for hexadecimal secrets, or character count with --password
         #[arg(long, default_value_t = 32)]
         bytes: usize,
+        /// Generate lowercase/uppercase letters, digits and special characters
+        #[arg(long)]
+        password: bool,
         /// Replace an existing secret with the same name
         #[arg(long)]
         force: bool,
@@ -243,9 +246,10 @@ pub fn run() -> Result<(), Error> {
         Cmd::Generate {
             name,
             bytes,
+            password,
             force,
             json,
-        } => generate(&paths, &name, bytes, force, json),
+        } => generate(&paths, &name, bytes, password, force, json),
         Cmd::Send {
             name,
             title,
@@ -418,7 +422,14 @@ fn info(paths: &Paths, name: &str, json: bool) -> Result<(), Error> {
     Ok(())
 }
 
-fn generate(paths: &Paths, name: &str, bytes: usize, force: bool, json: bool) -> Result<(), Error> {
+fn generate(
+    paths: &Paths,
+    name: &str,
+    bytes: usize,
+    password: bool,
+    force: bool,
+    json: bool,
+) -> Result<(), Error> {
     if !(16..=128).contains(&bytes) {
         return Err(Error::user("--bytes must be between 16 and 128"));
     }
@@ -443,6 +454,21 @@ fn generate(paths: &Paths, name: &str, bytes: usize, force: bool, json: bool) ->
         secret.push(HEX[(byte & 0x0f) as usize]);
     }
 
+    if password {
+        loop {
+            secret.clear();
+            const ALPHABET: &[u8] =
+                b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!@#$%&*+-_";
+            secret.extend((0..bytes).map(|_| ALPHABET[OsRng.gen_range(0..ALPHABET.len())]));
+            if secret.iter().any(u8::is_ascii_lowercase)
+                && secret.iter().any(u8::is_ascii_uppercase)
+                && secret.iter().any(u8::is_ascii_digit)
+                && secret.iter().any(u8::is_ascii_punctuation)
+            {
+                break;
+            }
+        }
+    }
     let meta = vault.put(name, &secret, "generated", "local")?;
     if json {
         println!("{}", serde_json::to_string(&meta)?);

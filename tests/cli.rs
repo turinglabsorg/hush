@@ -1038,3 +1038,39 @@ fn doctor_fails_on_loose_identity_perms() {
     let issues = report["issues"].to_string();
     assert!(issues.contains("identity"), "issues={issues}");
 }
+
+#[test]
+fn generated_password_meets_character_requirements_without_output() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("hush");
+    init_home(&home);
+    let out = bin()
+        .args(home_args(&home))
+        .args([
+            "generate",
+            "account-password",
+            "--password",
+            "--bytes",
+            "24",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let paths = Paths::new(home);
+    let secret = Vault::open(&paths)
+        .unwrap()
+        .get("account-password")
+        .unwrap();
+    assert_eq!(secret.len(), 24);
+    assert!(secret
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || b"!@#$%&*+-_".contains(byte)));
+    assert!(secret.iter().any(u8::is_ascii_lowercase));
+    assert!(secret.iter().any(u8::is_ascii_uppercase));
+    assert!(secret.iter().any(u8::is_ascii_digit));
+    assert!(secret.iter().any(u8::is_ascii_punctuation));
+    let rendered = String::from_utf8(secret.to_vec()).unwrap();
+    assert!(!String::from_utf8_lossy(&out.stdout).contains(&rendered));
+    assert!(!String::from_utf8_lossy(&out.stderr).contains(&rendered));
+}

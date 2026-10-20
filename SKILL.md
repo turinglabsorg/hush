@@ -104,6 +104,7 @@ the plaintext:
 
 ```bash
 hush generate <name> --json
+hush generate <name> --password --json   # Account password: upper/lowercase, digits and symbols
 ```
 
 The command refuses to overwrite an existing name unless `--force` is supplied.
