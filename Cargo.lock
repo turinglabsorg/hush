@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "hush"
-version = "0.7.0-dev"
+version = "0.7.0"
 dependencies = [
  "aes-gcm",
  "age",
