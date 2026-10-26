@@ -117,6 +117,7 @@ detect_asset() {
   arch="$(uname -m)"
   case "$os:$arch" in
     Linux:x86_64|Linux:amd64) printf 'hush-linux-x86_64' ;;
+    Linux:aarch64|Linux:arm64) printf 'hush-linux-aarch64' ;;
     Darwin:x86_64|Darwin:amd64) printf 'hush-macos-x86_64' ;;
     Darwin:arm64|Darwin:aarch64) printf 'hush-macos-aarch64' ;;
     *) fail "unsupported platform: $os $arch" ;;
