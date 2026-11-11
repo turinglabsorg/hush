@@ -60,6 +60,9 @@ pub fn send(
         ));
     }
     let vault = Vault::open(paths)?;
+    if vault.info(name)?.source == "passkey" {
+        return Err(Error::user("passkeys cannot be exported through Send"));
+    }
     let secret = vault.get(name)?;
     let text = std::str::from_utf8(&secret)
         .map_err(|_| Error::user("Send supports UTF-8 text secrets only"))?;

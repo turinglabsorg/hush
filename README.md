@@ -307,3 +307,14 @@ vault item → `pull` scan, `--consume` trash, `listen` poll, and `run` injectio
 ## License
 
 [MIT](LICENSE). Copyright (c) 2026 Turing Labs.
+
+## Persistent software passkeys
+
+Version 0.8 adds `hush passkey create`, `info`, `list`, `run` and `rm` for
+agent-owned software credentials with RS256 signatures and persistent WebAuthn
+PRF. Credentials remain encrypted in age; only the explicitly authorized worker
+receives assertion/PRF responses through a private pipe. An opt-in Playwright
+adapter is included for controlled browser workflows. This is not a native
+browser extension or hardware/biometric authenticator. See
+[the passkey operating guide](docs/passkeys.md) for verification, integration,
+limits and recovery.

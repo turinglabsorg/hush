@@ -45,6 +45,11 @@ pub fn run_with_totp(
     }
     let env_name = parse_env_name(env_name)?;
     let vault = Vault::open(paths)?;
+    if vault.info(name)?.source == "passkey" {
+        return Err(Error::user(
+            "passkeys can only be used with hush passkey run",
+        ));
+    }
     let secret = vault.get(name)?;
     let secret_str = std::str::from_utf8(&secret).map_err(|_| {
         Error::user("secret is not valid UTF-8; hush run only injects text secrets")

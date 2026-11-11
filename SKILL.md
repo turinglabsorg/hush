@@ -94,7 +94,34 @@ environment. Both the seed and code are redacted from child output. Invoke
 this only when the login is ready to accept the code. There is no command
 to display the code or seed. Do not replace an existing enrollment with
 `--force` without explicit authorization. TOTP does not automate SMS or
-push approval and does not store passkeys.
+push approval. For software passkeys, use the separate passkey commands below.
+
+## Software passkeys (0.8.0+)
+
+Only when the user authorizes creating/using an agent-owned software passkey:
+
+```bash
+hush generate AGENT_PASSKEY_PIN --password --json
+hush run --name AGENT_PASSKEY_PIN --env HUSH_PASSKEY_PIN --redact -- \
+  hush passkey create SERVICE_PASSKEY --rp-id service.example \
+  --origin https://service.example --pin-secret AGENT_PASSKEY_PIN --json
+hush run --name AGENT_PASSKEY_PIN --env HUSH_PASSKEY_PIN --redact -- \
+  hush passkey run --name SERVICE_PASSKEY -- node browser-worker.mjs
+hush passkey list --json
+hush passkey info SERVICE_PASSKEY --json
+```
+
+Read `docs/passkeys.md` before integration. The trusted worker can use the explicit
+`browser/playwright.mjs` adapter. This is an encrypted persistent **software**
+authenticator with RS256 and PRF, not a hardware/biometric authenticator or a
+normal browser's native passkey manager. Do not describe an adapter test as a
+native browser, hardware or Bitwarden passkey test. UP/UV refer to the authorized
+PIN-verified software session, not a person's physical presence. Keep private
+keys, PINs and PRF results out of transcripts. Workers use private stdin/stdout
+pipes; raw worker output is suppressed. Generic `hush run` and `hush send` cannot
+export passkeys. Never replace an existing name or delete a recovery method to
+make a test pass. `hush passkey rm NAME` removes only the local credential, so
+website revocation is a separate action.
 
 ## Generate a new secret
 

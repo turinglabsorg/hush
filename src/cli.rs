@@ -90,6 +90,9 @@ enum Cmd {
     /// Store an authenticator enrollment from stdin; never display seeds or codes
     #[command(subcommand)]
     Totp(TotpCmd),
+    /// Create and use encrypted software passkeys through a private worker
+    #[command(subcommand)]
+    Passkey(PasskeyCmd),
     /// Delete a secret by name
     Rm { name: String },
     /// Keep polling the Bitwarden vault for `hush put NAME` items (human daemon)
@@ -214,6 +217,43 @@ enum ExchangeCmd {
 }
 
 #[derive(Subcommand)]
+enum PasskeyCmd {
+    /// List software passkeys and public metadata
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a software passkey from this vault (does not revoke it on the website)
+    Rm { name: String },
+
+    /// Create a software passkey; verification secret must be injected with hush run
+    Create {
+        name: String,
+        #[arg(long)]
+        rp_id: String,
+        #[arg(long)]
+        origin: String,
+        #[arg(long)]
+        pin_secret: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show public metadata only
+    Info {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Authorize a bounded software-authenticator worker; raw worker output is suppressed
+    Run {
+        #[arg(long)]
+        name: String,
+        #[arg(required = true, last = true)]
+        command: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum BitwardenCmd {
     /// Show Bitwarden login/unlock status (never secrets)
     Status {
@@ -306,7 +346,41 @@ pub fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        Cmd::Rm { name } => rm(&paths, &name),
+        Cmd::Passkey(command) => match command {
+            PasskeyCmd::List { json: _ } => {
+                println!("{}", crate::passkey::list(&paths)?);
+                Ok(())
+            }
+            PasskeyCmd::Rm { name } => {
+                println!("{}", crate::passkey::remove(&paths, &name)?);
+                Ok(())
+            }
+
+            PasskeyCmd::Create {
+                name,
+                rp_id,
+                origin,
+                pin_secret,
+                json: _,
+            } => {
+                let receipt = crate::passkey::create(&paths, &name, &rp_id, &origin, &pin_secret)?;
+                println!("{}", receipt);
+                Ok(())
+            }
+            PasskeyCmd::Info { name, json: _ } => {
+                println!("{}", crate::passkey::info(&paths, &name)?);
+                Ok(())
+            }
+            PasskeyCmd::Run { name, command } => crate::passkey::run(&paths, &name, &command),
+        },
+        Cmd::Rm { name } => {
+            if Vault::open(&paths)?.info(&name)?.source == "passkey" {
+                println!("{}", crate::passkey::remove(&paths, &name)?);
+                Ok(())
+            } else {
+                rm(&paths, &name)
+            }
+        }
         Cmd::Listen {
             json,
             interval,

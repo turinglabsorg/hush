@@ -6,6 +6,7 @@ pub mod error;
 pub mod exchange;
 pub mod listen;
 pub mod name;
+pub mod passkey;
 pub mod paths;
 pub mod protocol;
 pub mod pull;

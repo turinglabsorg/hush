@@ -60,6 +60,15 @@ impl Vault {
         let name = parse_name(name)?;
         let now = now_rfc3339();
         let existing = self.read_meta(&name).ok();
+        if existing
+            .as_ref()
+            .is_some_and(|meta| meta.source == "passkey")
+            && source != "passkey"
+        {
+            return Err(Error::user(
+                "remove the existing passkey explicitly before replacing its name",
+            ));
+        }
         let created = existing
             .as_ref()
             .map(|meta| meta.created.clone())
